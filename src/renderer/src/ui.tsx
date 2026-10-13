@@ -197,8 +197,11 @@ export function Markdown({ text }: { text: string }) {
         return
       }
       flush(k + 'f')
-      const h = /^#{1,4}\s+(.*)/.exec(b)
-      out.push(h ? <h4 key={k}>{inline(h[1])}</h4> : <p key={k}>{lines(b)}</p>)
+      // A heading may be followed by text on the next line in the same block.
+      const h = /^#{1,4}\s+(.*)(?:\n([\s\S]*))?$/.exec(b)
+      if (!h) return void out.push(<p key={k}>{lines(b)}</p>)
+      out.push(<h4 key={k}>{inline(h[1])}</h4>)
+      if (h[2]?.trim()) out.push(<p key={`${k}p`}>{lines(h[2].trim())}</p>)
     })
     flush(`${i}-end`)
   })
