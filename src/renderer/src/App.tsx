@@ -138,7 +138,7 @@ export default function App() {
               </div>
             </header>
             <div className={`content ${tab === 'settings' ? '' : 'fixed'}`}>
-              {tab === 'work' && <Work key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} />}
+              {tab === 'work' && <Work key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} onSave={saveProject} />}
               {tab === 'team' && <Team key={project.id} project={project} providers={providers} onSave={saveProject} notify={notify} />}
               {tab === 'settings' && (
                 <Settings

@@ -30,6 +30,10 @@ const PATHS = {
   spark: 'M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8',
   chevron: 'M9 6l6 6-6 6',
   alert: 'M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
+  clock: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  swap: 'M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7',
+  refresh: 'M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5',
+  chart: 'M5 20v-8M11 20V5M17 20v-5M3 20h18',
   crown: 'M3 7l4 4 5-7 5 7 4-4-2 12H5Z',
   download: 'M12 3v12M7 10l5 5 5-5M5 21h14'
 } as const
@@ -67,7 +71,7 @@ export function Avatar({ name, seed, size = 28, status }: { name: string; seed?:
   const initials = name.trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?'
   return (
     <span
-      className={`avatar ${status === 'working' ? 'ring' : status === 'waiting' ? 'wait' : ''}`}
+      className={`avatar ${status === 'working' ? 'ring' : status === 'waiting' ? 'wait' : status === 'blocked' ? 'stuck' : ''}`}
       style={{
         width: size,
         height: size,

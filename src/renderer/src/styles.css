@@ -211,6 +211,7 @@ p { margin: 0; text-wrap: pretty; }
 .avatar { flex-shrink: 0; display: grid; place-items: center; border-radius: 30%; font-weight: 600; letter-spacing: -0.02em; position: relative; color: var(--text); }
 .avatar.ring { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--accent); animation: breathe 2s var(--ease) infinite; }
 .avatar.wait { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--text-3); }
+.avatar.stuck { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--danger); }
 @keyframes breathe { 50% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 5px rgb(245 158 11 / 35%); } }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
 .dot.live { background: var(--accent); animation: blink 1.6s var(--ease) infinite; }
@@ -328,6 +329,7 @@ li:hover > .node-wrap > .node-add, .node-add:focus-visible { opacity: 1; transfo
 .bubble { max-width: 78%; padding: 10px 14px; border-radius: 16px 16px 5px 16px; background: var(--raised); border: 1px solid var(--line); box-shadow: var(--highlight); }
 .bubble .to { font-size: 11.5px; color: var(--text-3); margin-bottom: 2px; }
 .msg.system .msg-body { color: var(--danger); font-size: 13px; }
+.msg.system.warn .msg-body { color: var(--accent-text); }
 .card { margin-top: 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-sm), var(--highlight); overflow: hidden; }
 .card-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; font-weight: 600; }
 .card-body { padding: 14px 16px; }
@@ -403,3 +405,12 @@ li:hover > .node-wrap > .node-add, .node-add:focus-visible { opacity: 1; transfo
 .prices > span { font-size: 11.5px; font-weight: 550; color: var(--text-3); }
 .price-row { display: contents; }
 .price-row .tag { margin-top: 2px; }
+
+/* Model problems in the feed */
+.dot.warn { background: var(--danger); }
+.event-line { margin-left: 40px; display: flex; align-items: center; gap: 7px; padding: 3px 0; font-size: 12.5px; color: var(--text-3); }
+.event-line svg { flex-shrink: 0; }
+.card.blocked { border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+.card.blocked .card-head { color: var(--danger); background: var(--danger-soft); }
+.card.blocked p { margin: 0; color: var(--text-2); font-size: 13.5px; line-height: 1.5; }
+.card.blocked pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: var(--text-2); }

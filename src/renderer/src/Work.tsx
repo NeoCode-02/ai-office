@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { SYSTEM, USER, type Agent, type AgentStatus, type OfficeEvent, type Project, type Provider, type RunSummary } from '../../shared/types'
+import { SYSTEM, USER, type Agent, type AgentStatus, type ModelRef, type OfficeEvent, type Project, type Provider, type RunSummary } from '../../shared/types'
 import type { Live } from './App'
 import { errText, useT } from './i18n'
+import { ModelInput } from './Team'
 import { Avatar, baseName, clock, dateTime, Empty, Icon, Markdown, Modal, Sheet, tokens, usd, type IconName } from './ui'
 
 const TOOL_ICON: Record<string, IconName> = {
@@ -23,6 +24,9 @@ type Item =
   | { kind: 'tools'; id: string; agentId: string; list: ToolEv[] }
   | { kind: 'approval'; e: Extract<OfficeEvent, { type: 'approval' }>; answer?: boolean }
   | { kind: 'end'; e: Extract<OfficeEvent, { type: 'run' }> }
+  | { kind: 'notice'; e: Extract<OfficeEvent, { type: 'notice' }> }
+  | { kind: 'switch'; e: Extract<OfficeEvent, { type: 'switch' }> }
+  | { kind: 'blocked'; e: Extract<OfficeEvent, { type: 'blocked' }>; resolved: boolean }
 
 interface Props {
   project: Project
@@ -30,9 +34,10 @@ interface Props {
   live?: Live
   notify(t: string): void
   goTeam(): void
+  onSave(p: Project): Promise<void>
 }
 
-export default function Work({ project, providers, live, notify, goTeam }: Props) {
+export default function Work({ project, providers, live, notify, goTeam, onSave }: Props) {
   const t = useT()
   const [text, setText] = useState('')
   const [focus, setFocus] = useState<string | null>(null)
@@ -72,7 +77,11 @@ export default function Work({ project, providers, live, notify, goTeam }: Props
   const items = useMemo(() => {
     const out: Item[] = []
     const answers = new Map<string, boolean>()
-    for (const e of events) if (e.type === 'approval_done') answers.set(e.id, e.approved)
+    const unblocked = new Set<string>()
+    for (const e of events) {
+      if (e.type === 'approval_done') answers.set(e.id, e.approved)
+      if (e.type === 'unblocked') unblocked.add(e.id)
+    }
     for (const e of events) {
       if (e.type === 'message') out.push({ kind: 'message', e })
       else if (e.type === 'tool') {
@@ -81,10 +90,17 @@ export default function Work({ project, providers, live, notify, goTeam }: Props
         else out.push({ kind: 'tools', id: e.id, agentId: e.agentId, list: [e] })
       } else if (e.type === 'approval') out.push({ kind: 'approval', e, answer: answers.get(e.id) })
       else if (e.type === 'run' && e.state !== 'running') out.push({ kind: 'end', e })
+      else if (e.type === 'notice') {
+        // Only the latest retry of a member is worth a line.
+        const last = out.at(-1)
+        if (last?.kind === 'notice' && last.e.agentId === e.agentId) out[out.length - 1] = { kind: 'notice', e }
+        else out.push({ kind: 'notice', e })
+      } else if (e.type === 'switch') out.push({ kind: 'switch', e })
+      else if (e.type === 'blocked') out.push({ kind: 'blocked', e, resolved: unblocked.has(e.id) })
     }
     if (!focus) return out
     return out.filter((i) =>
-      i.kind === 'message' ? i.e.from === focus || i.e.to.includes(focus) : i.kind === 'tools' ? i.agentId === focus : i.kind === 'approval' ? i.e.agentId === focus : true
+      i.kind === 'message' ? i.e.from === focus || i.e.to.includes(focus) : i.kind === 'tools' ? i.agentId === focus : i.kind === 'end' ? true : i.e.agentId === focus
     )
   }, [events, focus])
 
@@ -141,14 +157,15 @@ export default function Work({ project, providers, live, notify, goTeam }: Props
     />
   )
 
-  const stateLabel = viewing ? t.work.viewing : running ? t.work.running : s.state === 'stopped' ? t.work.stopped : s.state === 'done' ? t.work.done : t.work.idle
+  const attention = running && [...s.status.values()].includes('blocked')
+  const stateLabel = viewing ? t.work.viewing : attention ? t.work.attention : running ? t.work.running : s.state === 'stopped' ? t.work.stopped : s.state === 'done' ? t.work.done : t.work.idle
   const shown = project.agents.slice(0, 7)
 
   return (
     <div className="work">
       <div className="workbar">
         <span className="status">
-          <span className={`dot ${running ? 'live' : s.state === 'done' ? 'ok' : ''}`} />
+          <span className={`dot ${attention ? 'warn' : running ? 'live' : s.state === 'done' ? 'ok' : ''}`} />
           {stateLabel}
         </span>
         {!showStart && <span className="goal ellipsis" title={s.goal}>{viewing ? `${dateTime(viewing.run.startedAt)} · ${s.goal}` : s.goal}</span>}
@@ -221,7 +238,16 @@ export default function Work({ project, providers, live, notify, goTeam }: Props
           >
             <div className="feed-inner">
               {items.map((i) => (
-                <FeedItem key={i.kind === 'tools' ? i.id : i.kind === 'end' ? `end-${i.e.at}` : i.e.id} item={i} byId={byId} nameOf={nameOf} project={project} active={running} />
+                <FeedItem
+                  key={i.kind === 'tools' ? i.id : i.kind === 'end' || i.kind === 'notice' || i.kind === 'switch' ? `${i.kind}-${i.e.at}` : i.e.id}
+                  item={i}
+                  byId={byId}
+                  nameOf={nameOf}
+                  project={project}
+                  providers={providers}
+                  active={running}
+                  onSave={onSave}
+                />
               ))}
               {running && working.length > 0 && (
                 <div className="typing">
@@ -321,10 +347,41 @@ function Composer({ value, onChange, onSend, busy, placeholder, hint }: { value:
   )
 }
 
-function FeedItem({ item, byId, nameOf, project, active }: { item: Item; byId: Map<string, Agent>; nameOf(id: string): string; project: Project; active: boolean }) {
+function FeedItem({ item, byId, nameOf, project, providers, active, onSave }: {
+  item: Item
+  byId: Map<string, Agent>
+  nameOf(id: string): string
+  project: Project
+  providers: Provider[]
+  active: boolean
+  onSave(p: Project): Promise<void>
+}) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const label = (m: ModelRef) => `${providers.find((p) => p.id === m.providerId)?.name ?? '?'} · ${m.model}`
+
+  if (item.kind === 'notice') {
+    const e = item.e
+    return (
+      <div className="event-line" role="status">
+        <Icon name="clock" size={13} />
+        <span>{t.work.notice(nameOf(e.agentId), t.work.kinds[e.kind], Math.round(e.waitMs / 1000), e.attempt, e.of)}</span>
+      </div>
+    )
+  }
+
+  if (item.kind === 'switch') {
+    const e = item.e
+    return (
+      <div className="event-line" title={e.detail}>
+        <Icon name="swap" size={13} />
+        <span>{t.work.switched(nameOf(e.agentId), label(e.to), t.work.kinds[e.kind])}</span>
+      </div>
+    )
+  }
+
+  if (item.kind === 'blocked') return <BlockedCard e={item.e} resolved={item.resolved || !active} name={nameOf(item.e.agentId)} label={label} project={project} providers={providers} onSave={onSave} />
 
   if (item.kind === 'end') {
     const r = t.work.reasons[item.e.reason ?? '']
@@ -405,9 +462,10 @@ function FeedItem({ item, byId, nameOf, project, active }: { item: Item; byId: M
     )
   }
   if (e.from === SYSTEM) {
+    const warn = e.text.startsWith('E_UNPRICED')
     return (
-      <div className="msg system">
-        <span className="avatar" style={{ width: 28, height: 28, background: 'var(--danger-soft)', color: 'var(--danger)' }}>
+      <div className={`msg system ${warn ? 'warn' : ''}`}>
+        <span className="avatar" style={warn ? { width: 28, height: 28, background: 'var(--accent-soft)', color: 'var(--accent-text)' } : { width: 28, height: 28, background: 'var(--danger-soft)', color: 'var(--danger)' }}>
           <Icon name="alert" size={14} />
         </span>
         <div className="msg-main">
@@ -497,5 +555,78 @@ function PersonSheet({ agent, provider, manager, status, cost, focused, onFocus,
         <p className="faint small" style={{ textAlign: 'center' }}>{t.work.onlyTheirs}</p>
       </div>
     </Sheet>
+  )
+}
+
+function BlockedCard({ e, resolved, name, label, project, providers, onSave }: {
+  e: Extract<OfficeEvent, { type: 'blocked' }>
+  resolved: boolean
+  name: string
+  label(m: ModelRef): string
+  project: Project
+  providers: Provider[]
+  onSave(p: Project): Promise<void>
+}) {
+  const t = useT()
+  const [picking, setPicking] = useState(false)
+  const [providerId, setProviderId] = useState(e.providerId)
+  const [model, setModel] = useState(e.model)
+  const [busy, setBusy] = useState(false)
+  const advice = e.kind === 'config' ? errText(e.detail) : t.work.advice[e.kind]
+
+  const go = async (to?: ModelRef) => {
+    setBusy(true)
+    try {
+      // The new model sticks: the member keeps it in later tasks too.
+      if (to) await onSave({ ...project, agents: project.agents.map((a) => (a.id === e.agentId ? { ...a, ...to } : a)) })
+      await window.office.retryAgent(project.id, e.agentId, to)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card blocked" role="alert">
+      <div className="card-head">
+        <Icon name="alert" size={14} />
+        <span className="ellipsis">{t.work.blockedTitle(name, t.work.kinds[e.kind])}</span>
+        <span className="spacer" />
+        <span className="faint small mono" style={{ fontWeight: 400 }}>{label(e)}</span>
+      </div>
+      <div className="card-body stack tight">
+        <p>{advice}</p>
+        {e.kind !== 'config' && e.detail && (
+          <details className="more">
+            <summary><Icon name="chevron" size={12} /> {t.work.details}</summary>
+            <pre>{e.detail}</pre>
+          </details>
+        )}
+        {resolved ? (
+          <div className="row small faint"><Icon name="check" size={13} /> {t.work.resolved}</div>
+        ) : picking ? (
+          <div className="stack tight">
+            <div className="grid2">
+              <select className="select" value={providerId} onChange={(x) => setProviderId(x.target.value)} aria-label={t.team.provider}>
+                {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <ModelInput providerId={providerId} value={model} onChange={setModel} />
+            </div>
+            <div className="row">
+              <button className="btn primary sm" disabled={busy || !model.trim()} onClick={() => go({ providerId, model: model.trim() })}>{t.work.switchTo}</button>
+              <button className="btn sm" onClick={() => setPicking(false)}>{t.common.cancel}</button>
+            </div>
+          </div>
+        ) : (
+          <div className="row">
+            <button className="btn primary sm" disabled={busy} onClick={() => go()}>
+              <Icon name="refresh" size={13} /> {t.work.retry}
+            </button>
+            <button className="btn sm" onClick={() => setPicking(true)}>
+              <Icon name="swap" size={13} /> {t.work.otherModel}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
