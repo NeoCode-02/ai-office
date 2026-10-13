@@ -115,6 +115,11 @@ describe('request cap and budget', () => {
     expect(n).toBe(3)
     expect(office.requests).toBe(3)
     expect(lastRun(events)).toMatchObject({ state: 'stopped', reason: 'limit', requests: 3 })
+    // The owner can continue: the cap counts from their latest message.
+    office.post('keep going')
+    await until(() => !office.isRunning)
+    expect(n).toBe(6)
+    expect(lastRun(events)).toMatchObject({ state: 'stopped', reason: 'limit', requests: 3 })
   })
 
   it('refuses new work once the budget is spent; raising it with configure() continues the run', async () => {

@@ -196,6 +196,8 @@ export class Office {
   private wakers = new Set<() => void>()
   private spent = 0
   private requestCount = 0
+  /** The request cap counts from the owner's latest message, so continuing after a 'limit' stop works. */
+  private capBase = 0
   private ceo: Agent
   /** Aborted by stop(); a new one for each running period. */
   private ac = new AbortController()
@@ -246,6 +248,7 @@ export class Office {
   post(text: string, to: string = this.ceo.id) {
     this.checkBudget()
     this.chatter.clear()
+    this.capBase = this.requestCount
     this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: USER, to: [to], text })
     this.setRunning(true)
     this.deliver(to, `[From the owner] ${text}`)
@@ -761,7 +764,7 @@ export class Office {
     this.emit({ type: 'cost', agentId: a.id, providerId, model, usd, usage, at: Date.now() })
     const max = this.limits.maxRequests
     if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) this.stop('budget', { usd: this.spent })
-    else if (max > 0 && this.requestCount >= max) this.stop('limit', { requests: this.requestCount })
+    else if (max > 0 && this.requestCount - this.capBase >= max) this.stop('limit', { requests: this.requestCount - this.capBase })
   }
 }
 
