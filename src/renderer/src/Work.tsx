@@ -53,18 +53,20 @@ export default function Work({ project, providers, live, notify, goTeam }: Props
     const cost = new Map<string, number>()
     let total = 0
     let toks = 0
+    let unpriced = 0
     let state: string | null = null
     for (const e of events) {
       if (e.type === 'status') status.set(e.agentId, e.status)
       if (e.type === 'cost') {
-        cost.set(e.agentId, (cost.get(e.agentId) ?? 0) + e.usd)
-        total += e.usd
-        toks += e.inTok + e.outTok
+        cost.set(e.agentId, (cost.get(e.agentId) ?? 0) + (e.usd ?? 0))
+        total += e.usd ?? 0
+        if (e.usd === null) unpriced++
+        toks += e.usage ? e.usage.in + e.usage.cacheRead + e.usage.cacheWrite + e.usage.out : (e.inTok ?? 0) + (e.outTok ?? 0)
       }
       if (e.type === 'run') state = e.state
     }
     const goal = events.find((e) => e.type === 'message' && e.from === USER)
-    return { status, cost, total, toks, state, goal: goal?.type === 'message' ? goal.text : '' }
+    return { status, cost, total, toks, unpriced, state, goal: goal?.type === 'message' ? goal.text : '' }
   }, [events])
 
   const items = useMemo(() => {
@@ -166,8 +168,8 @@ export default function Work({ project, providers, live, notify, goTeam }: Props
           {project.agents.length > shown.length && <span className="stack-more">+{project.agents.length - shown.length}</span>}
         </div>
         {!showStart && (
-          <span className="pill" title={`${tokens(s.toks)} ${t.work.tokens}`}>
-            {usd(s.total)}
+          <span className="pill" title={`${tokens(s.toks)} ${t.work.tokens}${s.unpriced ? ` · ${t.work.unpriced(s.unpriced)}` : ''}`}>
+            {usd(s.total)}{s.unpriced > 0 && '+'}
             {project.budgetUsd > 0 && <span className="faint">{t.work.budget(project.budgetUsd)}</span>}
           </span>
         )}

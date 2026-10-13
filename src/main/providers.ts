@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
-import type { ProviderKind } from '../shared/types'
+import type { ProviderKind, Usage } from '../shared/types'
 
 export interface ToolDef {
   name: string
@@ -20,8 +20,7 @@ export interface ToolResult {
 export interface Turn {
   text: string
   calls: ToolCall[]
-  inTok: number
-  outTok: number
+  usage: Usage
 }
 export interface Conn {
   kind: ProviderKind
@@ -32,6 +31,7 @@ export interface Conn {
 /**
  * One agent's private conversation. History stays in the provider's native
  * format so provider-specific blocks (thinking, reasoning_content) replay intact.
+ * A failed step leaves the history unchanged, so the same step can be retried.
  */
 export interface Chat {
   step(results: ToolResult[], text?: string): Promise<Turn>
@@ -76,7 +76,9 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
 
   return {
     async step(results, text) {
-      results = [...orphans.map((id) => ({ id, content: 'Bekor qilindi', isError: true })), ...results]
+      const mark = messages.length
+      const prevOrphans = orphans
+      results = [...orphans.map((id) => ({ id, content: 'Not run: the previous reply was cut off', isError: true })), ...results]
       orphans = []
       const content: Anthropic.Beta.BetaContentBlockParam[] = results.map((r) => ({
         type: 'tool_result',
@@ -87,8 +89,10 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
       if (text) content.push({ type: 'text', text })
       messages.push({ role: 'user', content })
 
-      const msg = await client.beta.messages
-        .stream({
+      let msg: Anthropic.Beta.BetaMessage
+      try {
+        msg = await client.beta.messages
+          .stream({
           model,
           max_tokens: 32000,
           system,
@@ -97,14 +101,23 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
           cache_control: { type: 'ephemeral' },
           ...fallback
         })
-        .finalMessage()
+          .finalMessage()
+      } catch (e) {
+        messages.length = mark
+        orphans = prevOrphans
+        throw e
+      }
       messages.push({ role: 'assistant', content: msg.content })
 
       const turn: Turn = {
         text: msg.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n'),
         calls: [],
-        inTok: msg.usage.input_tokens + (msg.usage.cache_read_input_tokens ?? 0),
-        outTok: msg.usage.output_tokens
+        usage: {
+          in: msg.usage.input_tokens,
+          cacheRead: msg.usage.cache_read_input_tokens ?? 0,
+          cacheWrite: msg.usage.cache_creation_input_tokens ?? 0,
+          out: msg.usage.output_tokens
+        }
       }
       // Refused or cut-off turns may hold a partial tool_use: never run it.
       if (msg.stop_reason === 'refusal' || msg.stop_reason === 'max_tokens') {
@@ -130,12 +143,19 @@ function openaiChat(conn: Conn, model: string, system: string, tools: ToolDef[])
 
   return {
     async step(results, text) {
+      const mark = messages.length
       for (const r of results) messages.push({ role: 'tool', tool_call_id: r.id, content: r.content })
       if (text) messages.push({ role: 'user', content: text })
 
-      const res = await client.chat.completions.create({ model, messages, tools: defs })
+      let res: OpenAI.Chat.ChatCompletion
+      try {
+        res = await client.chat.completions.create({ model, messages, tools: defs })
+        if (!res.choices[0]) throw new Error('The provider returned an empty response')
+      } catch (e) {
+        messages.length = mark
+        throw e
+      }
       const choice = res.choices[0]
-      if (!choice) throw new Error('The provider returned an empty response')
       // Push as returned: keeps extra fields like DeepSeek's reasoning_content.
       messages.push(choice.message as OpenAI.Chat.ChatCompletionAssistantMessageParam)
 
@@ -147,11 +167,35 @@ function openaiChat(conn: Conn, model: string, system: string, tools: ToolDef[])
       return {
         text: choice.message.content ?? '',
         calls,
-        inTok: res.usage?.prompt_tokens ?? 0,
-        outTok: res.usage?.completion_tokens ?? 0
+        usage: openaiUsage(res.usage)
       }
     }
   }
+}
+
+type Num = number | null | undefined
+interface CompatUsage {
+  prompt_tokens?: Num
+  completion_tokens?: Num
+  total_tokens?: Num
+  prompt_tokens_details?: { cached_tokens?: Num; cache_write_tokens?: Num } | null
+  prompt_cache_hit_tokens?: Num // DeepSeek
+  cached_tokens?: Num // Kimi
+  cost?: Num // OpenRouter: the amount actually billed
+}
+
+/** Normalizes the usage block of OpenAI-compatible APIs; `in` excludes cached tokens. */
+export function openaiUsage(u: CompatUsage | null | undefined): Usage {
+  const n = (v: Num) => (typeof v === 'number' && v > 0 ? v : 0)
+  const prompt = n(u?.prompt_tokens)
+  const completion = n(u?.completion_tokens)
+  const cacheRead = Math.min(prompt, n(u?.prompt_tokens_details?.cached_tokens) || n(u?.prompt_cache_hit_tokens) || n(u?.cached_tokens))
+  const cacheWrite = Math.min(prompt - cacheRead, n(u?.prompt_tokens_details?.cache_write_tokens))
+  // Some APIs (Gemini) leave hidden reasoning out of completion_tokens but count it in the total.
+  const hidden = Math.max(0, n(u?.total_tokens) - prompt - completion)
+  const usage: Usage = { in: prompt - cacheRead - cacheWrite, cacheRead, cacheWrite, out: completion + hidden }
+  if (typeof u?.cost === 'number') usage.usd = u.cost
+  return usage
 }
 
 function asObject(v: unknown): Record<string, unknown> {

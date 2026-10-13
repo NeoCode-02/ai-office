@@ -9,6 +9,25 @@ export interface Provider {
   hasKey: boolean
 }
 
+/** Tokens of one model request. `in` is the uncached part of the prompt. */
+export interface Usage {
+  in: number
+  cacheRead: number
+  cacheWrite: number
+  out: number
+  /** What the provider says it billed (OpenRouter), when it says so. */
+  usd?: number
+}
+
+/** USD per 1M tokens. `long` applies to the whole request once its prompt is above `above` tokens. */
+export interface Price {
+  in: number
+  out: number
+  cacheRead?: number
+  cacheWrite?: number
+  long?: { above: number; in: number; out: number; cacheRead?: number; cacheWrite?: number }
+}
+
 export const TOOL_NAMES = [
   'list_files',
   'read_file',
@@ -59,7 +78,8 @@ export type OfficeEvent =
   | { type: 'message'; id: string; at: number; from: string; to: string[]; text: string }
   | { type: 'tool'; id: string; at: number; agentId: string; name: string; summary: string; ok: boolean }
   | { type: 'status'; agentId: string; status: AgentStatus; at: number }
-  | { type: 'cost'; agentId: string; usd: number; inTok: number; outTok: number; at: number }
+  /** usd is null when the price is unknown. Runs saved before v0.3 have inTok/outTok instead of usage. */
+  | { type: 'cost'; agentId: string; usd: number | null; usage?: Usage; inTok?: number; outTok?: number; at: number }
   | { type: 'approval'; id: string; agentId: string; kind: 'command' | 'mcp'; command: string; at: number }
   | { type: 'approval_done'; id: string; approved: boolean; at: number }
   /** reason is a code: owner_stopped | new_task | idle | report | budget (usd set) */

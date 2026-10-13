@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import os from 'node:os'
-import { SYSTEM, USER, type Agent, type OfficeEvent, type Project, type ToolName } from '../shared/types'
+import { SYSTEM, USER, type Agent, type OfficeEvent, type Project, type ProviderKind, type ToolName, type Usage } from '../shared/types'
+import { cost } from './billing'
 import type { McpToolbox } from './mcp'
 import { openChat, type Chat, type Conn, type ToolResult } from './providers'
 import { runTool, TOOL_DEFS } from './tools'
@@ -90,6 +91,7 @@ ${notes.trim() ? `\n# Your notes from earlier work\n${notes.trim()}` : ''}`
 interface Member {
   agent: Agent
   chat?: Chat
+  kind?: ProviderKind
   mcp?: McpToolbox
   inbox: string[]
   open: ToolResult[]
@@ -212,8 +214,10 @@ export class Office {
         m.mcp = await this.deps.mcp(a.mcpServers)
         for (const err of m.mcp.errors) this.system(`${a.name}: MCP ${err}`)
       }
+      const conn = this.deps.conn(a.providerId)
+      m.kind = conn.kind
       m.chat = (this.deps.openChat ?? openChat)(
-        this.deps.conn(a.providerId),
+        conn,
         a.model,
         systemPrompt(this.project, a, this.deps.readNotes(a.id), skills),
         [...allowed.map((t) => TOOL_DEFS[t]), ...(m.mcp?.defs ?? [])]
@@ -227,7 +231,7 @@ export class Office {
       if (step === MAX_STEPS) input = 'Step limit reached. Stop now and report your progress.'
       const turn = await m.chat.step(results, input)
       input = undefined
-      this.charge(a, turn.inTok, turn.outTok)
+      this.charge(m, turn.usage)
       if (!turn.calls.length) {
         if (!sent && turn.text.trim() && this.running) this.forward(a, turn.text)
         return
@@ -318,10 +322,12 @@ export class Office {
     )
   }
 
-  private charge(a: Agent, inTok: number, outTok: number) {
-    const usd = (inTok * a.priceIn + outTok * a.priceOut) / 1e6
-    this.spent += usd
-    this.emit({ type: 'cost', agentId: a.id, usd, inTok, outTok, at: Date.now() })
+  private charge(m: Member, usage: Usage) {
+    const a = m.agent
+    const priced = a.priceIn > 0 || a.priceOut > 0
+    const usd = usage.usd ?? (priced ? cost({ in: a.priceIn, out: a.priceOut }, m.kind ?? 'openai', usage) : null)
+    this.spent += usd ?? 0
+    this.emit({ type: 'cost', agentId: a.id, usd, usage, at: Date.now() })
     if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) this.stop('budget', this.spent)
   }
 }

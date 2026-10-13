@@ -37,7 +37,7 @@ function setup(agents: Agent[], scripts: Record<string, Script>, extra: Partial<
     openChat: (_c, _m, system): Chat => {
       const name = /^You are (\w+),/.exec(system)![1]
       return {
-        step: async (results, input) => ({ text: '', calls: [], inTok: 1000, outTok: 1000, ...scripts[name](input, results) })
+        step: async (results, input) => ({ text: '', calls: [], usage: { in: 1000, cacheRead: 0, cacheWrite: 0, out: 1000 }, ...scripts[name](input, results) })
       }
     }
   })
