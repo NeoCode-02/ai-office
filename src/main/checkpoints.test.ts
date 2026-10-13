@@ -35,7 +35,7 @@ function tree(root: string, skip = '.git'): Record<string, string> {
 }
 
 /** Folder names with spaces and non-ASCII letters, like "Application Support/AI Office" on macOS. */
-function setup(opts: { maxFiles?: number } = {}) {
+function setup(opts: { maxFiles?: number; maxBytes?: number } = {}) {
   const data = tmp('cp data (AI Office) ')
   const ws = tmp('cp ishchi papka ü ')
   return { data, ws, cp: createCheckpoints(data, 'git', opts) }
@@ -239,6 +239,19 @@ describe('checkpoints', () => {
     put(small.ws, 'a.txt', 'a')
     put(small.ws, 'b.txt', 'b')
     for (let i = 0; i < 10; i++) put(small.ws, `dist/chunk${i}.js`, String(i))
+    await small.cp.snapshot('p1', 'r1', small.ws)
+    expect((await small.cp.changes('p1', 'r1', small.ws)).available).toBe(true)
+  }, T)
+
+  it('refuses a workspace whose files are too large to copy, ignored files not counted', async () => {
+    const { ws, cp } = setup({ maxBytes: 1000 })
+    put(ws, 'big.bin', 'x'.repeat(2000))
+    await expect(cp.snapshot('p1', 'r1', ws)).rejects.toThrow('E_CHECKPOINT_TOO_BIG')
+
+    const small = setup({ maxBytes: 1000 })
+    put(small.ws, '.gitignore', 'data/\n')
+    put(small.ws, 'a.txt', 'a')
+    put(small.ws, 'data/huge.bin', 'x'.repeat(5000))
     await small.cp.snapshot('p1', 'r1', small.ws)
     expect((await small.cp.changes('p1', 'r1', small.ws)).available).toBe(true)
   }, T)

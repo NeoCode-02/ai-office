@@ -15,6 +15,8 @@ const TIMEOUT = 60_000
 /** The exact file count runs only when the quick walk found too many files; a giant tree must not hang the start. */
 const COUNT_TIMEOUT = 20_000
 const MAX_FILES = 20_000
+/** Every snapshot is a full copy in the shadow repository: a workspace of datasets or videos would double the disk use. */
+const MAX_BYTES = 1024 * 1024 * 1024
 const MAX_DIFF_LINES = 2000
 const KEEP = 64 * 1024 * 1024
 const DIFF_KEEP = 2 * 1024 * 1024
@@ -159,6 +161,17 @@ function quickCount(dir: string, limit: number): number {
   return n
 }
 
+/** Bytes of the listed files (folders, i.e. nested repositories, are skipped); stops counting past the limit. */
+function sizeOf(root: string, list: string[]): number {
+  let bytes = 0
+  for (const p of list) {
+    if (p.endsWith('/')) continue
+    bytes += fs.lstatSync(path.join(root, ...p.split('/')), { throwIfNoEntry: false })?.size ?? 0
+    if (bytes > MAX_BYTES * 4) break
+  }
+  return bytes
+}
+
 function parseChanges(raw: Buffer, numstat: Buffer): FileChange[] {
   const counts = new Map<string, { additions: number; deletions: number; binary: boolean }>()
   for (const rec of numstat.toString('utf8').split('\0')) {
@@ -196,8 +209,9 @@ function clipLines(r: Result): string {
 /** Throws E_GIT on an exit code outside `ok` (default 0) and on a timeout, unless `allowTimeout`. */
 type Git = (args: string[], o?: { input?: string; ok?: number[]; keep?: number; timeout?: number; allowTimeout?: boolean }) => Promise<Result>
 
-export function createCheckpoints(dataDir: string, gitBin = 'git', opts: { maxFiles?: number } = {}) {
+export function createCheckpoints(dataDir: string, gitBin = 'git', opts: { maxFiles?: number; maxBytes?: number } = {}) {
   const maxFiles = opts.maxFiles ?? MAX_FILES
+  const maxBytes = opts.maxBytes ?? MAX_BYTES
   const home = path.join(dataDir, 'checkpoints')
   const hooks = path.join(home, 'no-hooks')
   const queues = new Map<string, Promise<unknown>>()
@@ -300,7 +314,7 @@ export function createCheckpoints(dataDir: string, gitBin = 'git', opts: { maxFi
 
   async function currentChanges(git: Git, ref: string): Promise<FileChange[]> {
     await git(['add', '-A'])
-    const flags = ['--cached', '--no-renames', '--no-ext-diff', '--no-color', '-z']
+    const flags = ['--cached', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-color', '-z']
     const raw = await git(['diff', ...flags, '--raw', ref])
     const numstat = await git(['diff', ...flags, '--numstat', ref])
     return parseChanges(raw.out, numstat.out)
@@ -357,7 +371,7 @@ export function createCheckpoints(dataDir: string, gitBin = 'git', opts: { maxFi
           setExcludes(dir, '')
           const listed = await git(['ls-files', '-o', '--exclude-standard', '-z'], big ? { timeout: COUNT_TIMEOUT, allowTimeout: true } : {})
           const found = paths(listed.out)
-          if (listed.timedOut || found.length > maxFiles) {
+          if (listed.timedOut || found.length > maxFiles || sizeOf(root, found) > maxBytes) {
             writeMeta(dir, runId, 'reason', 'E_CHECKPOINT_TOO_BIG')
             throw fail('E_CHECKPOINT_TOO_BIG')
           }

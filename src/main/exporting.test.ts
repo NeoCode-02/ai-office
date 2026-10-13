@@ -34,7 +34,9 @@ describe('office export / import', () => {
     expect(p.agents.map((a) => a.reportsTo)).toEqual([null, 'new1', 'new2'])
     expect(p.agents[1].backup).toEqual({ providerId: 'p2', model: 'cheap' })
     expect(p.agents[0]).toMatchObject({ name: 'Ann', title: 'CEO', effort: 'high', maxTokens: 64000, skills: ['report-writing'] })
-    expect(p.agents[1]).toMatchObject({ mcpServers: ['github'], tools: ['read_file', 'run_command'] })
+    expect(p.agents[1]).toMatchObject({ tools: ['read_file', 'run_command'] })
+    // A shared file must not hand its members this computer's MCP servers.
+    expect(p.agents[1].mcpServers).toBeUndefined()
     expect(p).toMatchObject({ name: 'Acme', briefing: 'We sell shoes.', budgetUsd: 7.5, limits: office.limits, planFirst: true, sandbox: office.sandbox, checkpoints: false })
   })
 

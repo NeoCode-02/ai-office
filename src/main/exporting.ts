@@ -34,7 +34,7 @@ export function projectFromJson(text: string, newId: () => string): Project {
       model: a.model,
       ...(a.backup && { backup: { providerId: a.backup.providerId, model: a.backup.model } }),
       tools: [...a.tools],
-      ...(a.mcpServers && { mcpServers: [...a.mcpServers] }),
+      // Access to this computer's MCP servers is the owner's choice here, not the file's.
       ...(a.effort && { effort: a.effort }),
       ...(a.maxTokens !== undefined && { maxTokens: a.maxTokens }),
       ...(a.skills && { skills: [...a.skills] })
