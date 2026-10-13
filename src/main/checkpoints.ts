@@ -441,14 +441,13 @@ export async function commitWorkspace(workspaceDir: string, message: string, git
   }
   const inside = await run(gitBin, ['rev-parse', '--is-inside-work-tree'], { cwd: root, env })
   if (inside.code !== 0 || inside.out.toString().trim() !== 'true') throw fail('E_NOT_GIT_REPO')
-  const top = (await git(['rev-parse', '--show-toplevel'])).out.toString().trim()
-  const topReal = fs.realpathSync(top)
-  const wsReal = fs.realpathSync(root)
-  if (!within(topReal, wsReal)) throw fail('E_NOT_GIT_REPO')
+  // Ask git where the workspace sits in the repository instead of comparing paths: on Windows git prints
+  // long, forward-slash paths while the workspace path may use 8.3 short names (C:\Users\RUNNER~1).
+  const prefix = (await git(['rev-parse', '--show-prefix'])).out.toString().trim()
   await git(['add', '-A', '--', '.'])
   if ((await git(['diff', '--cached', '--quiet', '--no-ext-diff', '--', '.'], [0, 1])).code === 0) throw fail('E_NOTHING_TO_COMMIT')
   const text = message.trim() || 'Changes by AI Office'
-  const whole = within(wsReal, topReal)
+  const whole = prefix === ''
   // In a subfolder of a bigger repository, `-- .` keeps what the user staged elsewhere out of this commit.
   await git(['commit', '-q', '-m', text, ...(whole ? [] : ['--', '.'])])
   return (await git(['rev-parse', '--short', 'HEAD'])).out.toString().trim()
