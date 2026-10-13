@@ -108,9 +108,11 @@ export function createExtensions(dataDir: string, cipher: Cipher) {
   const skillsDir = path.join(dataDir, 'skills')
   const pluginsDir = path.join(dataDir, 'plugins')
   const state = (): State => ({ mcp: [], disabledSkills: [], plugins: {}, ...readJson<Partial<State>>(stateFile, {}) })
+  // Write then rename, so a crash mid-write can't leave a truncated file (and lose every MCP server).
   const save = (s: State) => {
     fs.mkdirSync(dataDir, { recursive: true })
-    fs.writeFileSync(stateFile, JSON.stringify(s, null, 2))
+    fs.writeFileSync(stateFile + '.tmp', JSON.stringify(s, null, 2))
+    fs.renameSync(stateFile + '.tmp', stateFile)
   }
   const plugins = () => subdirs(pluginsDir).map(readPlugin)
   const enabledPlugins = () => {

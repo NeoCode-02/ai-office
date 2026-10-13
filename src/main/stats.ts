@@ -1,4 +1,4 @@
-import type { Billing, QuotaUse, UsageRecord, UsageRow, UsageStats } from '../shared/types'
+import type { AppSettings, Billing, CapUse, QuotaUse, UsageRecord, UsageRow, UsageStats } from '../shared/types'
 
 const row = (): UsageRow => ({ requests: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0, usd: 0, unpriced: 0 })
 
@@ -72,4 +72,25 @@ export function quotaUse(records: UsageRecord[], providerId: string, billing: Bi
     used += q.unit === 'requests' ? 1 : q.unit === 'tokens' ? tokensOf(x) : (x.usd ?? 0)
   }
   return { used, amount: q.amount, unit: q.unit, window: q.window }
+}
+
+/**
+ * App-wide spend for the caps: this local calendar day and this calendar month, around `now`.
+ * Unknown prices (null) count as $0.
+ */
+export function capUse(records: UsageRecord[], settings: Pick<AppSettings, 'dailyCapUsd' | 'monthlyCapUsd'>, now: number): CapUse {
+  const d = new Date(now)
+  const dayFrom = windowStart('day', now)
+  const dayTo = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
+  const monthFrom = windowStart('month', now)
+  const monthTo = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime()
+  let day = 0
+  let month = 0
+  for (const x of records) {
+    // The log is plain JSON; a damaged record must not turn the sum into NaN.
+    const usd = typeof x.usd === 'number' && Number.isFinite(x.usd) ? x.usd : 0
+    if (x.at >= monthFrom && x.at < monthTo) month += usd
+    if (x.at >= dayFrom && x.at < dayTo) day += usd
+  }
+  return { day, month, dailyCapUsd: settings.dailyCapUsd, monthlyCapUsd: settings.monthlyCapUsd }
 }

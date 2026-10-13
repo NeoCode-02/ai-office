@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { OfficeEvent, Project, Provider, RunSummary, UsageRecord } from '../shared/types'
+import { DEFAULT_SETTINGS, type AppSettings, type OfficeEvent, type Project, type Provider, type RunSummary, type UsageRecord } from '../shared/types'
 import type { Conn } from './providers'
+import { bool, num, obj } from './validate'
 
 interface StoredProvider extends Omit<Provider, 'hasKey'> {
   key: string // encrypted
@@ -11,6 +12,32 @@ type LegacyAgent = Project['agents'][number] & { priceIn?: number; priceOut?: nu
 export interface Cipher {
   encrypt(s: string): string
   decrypt(s: string): string
+}
+
+/** Whether a file is empty or ends with a newline. */
+function endsLine(f: string): boolean {
+  const fd = fs.openSync(f, 'r')
+  try {
+    const size = fs.fstatSync(fd).size
+    if (size === 0) return true
+    const last = Buffer.alloc(1)
+    fs.readSync(fd, last, 0, 1, size - 1)
+    return last[0] === 0x0a
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/** Known fields of `v` that have the right type, over `base`. */
+function settingsFrom(v: unknown, base: AppSettings): AppSettings {
+  const s = { ...base }
+  if (!obj(v)) return s
+  if (v.theme === 'system' || v.theme === 'light' || v.theme === 'dark') s.theme = v.theme
+  if (num(v.dailyCapUsd, 0)) s.dailyCapUsd = v.dailyCapUsd
+  if (num(v.monthlyCapUsd, 0)) s.monthlyCapUsd = v.monthlyCapUsd
+  if (bool(v.notifications)) s.notifications = v.notifications
+  if (bool(v.checkUpdates)) s.checkUpdates = v.checkUpdates
+  return s
 }
 
 /** Plain JSON/JSONL files: small data, no native modules, easy to back up. */
@@ -39,7 +66,29 @@ export function createStore(dir: string, cipher: Cipher) {
       return false
     }
   }
-  const projectDir = (id: string) => file('projects', path.basename(id))
+  const projectDir = (id: string) => {
+    // basename alone lets '', '.' and '..' through, which would point at the data folder itself.
+    const name = path.basename(String(id))
+    if (!name || name === '.' || name === '..') throw new Error('E_BAD_ARGS')
+    return file('projects', name)
+  }
+  const hasProject = (id: string) => {
+    try {
+      return fs.existsSync(path.join(projectDir(id), 'project.json'))
+    } catch {
+      return false
+    }
+  }
+  const runsFile = (projectId: string) => path.join(projectDir(projectId), 'runs.json')
+  const runFile = (projectId: string, runId: string) => path.join(projectDir(projectId), 'runs', path.basename(runId) + '.jsonl')
+  const listRuns = (projectId: string) => read<RunSummary[]>(runsFile(projectId), [])
+  /** A request can finish after its office was deleted; never recreate the folder for it. */
+  const appendEvent = (projectId: string, runId: string, ev: OfficeEvent) => {
+    if (!hasProject(projectId)) return
+    const f = runFile(projectId, runId)
+    fs.mkdirSync(path.dirname(f), { recursive: true })
+    fs.appendFileSync(f, JSON.stringify(ev) + '\n')
+  }
   const projects = (): Project[] => {
     if (!fs.existsSync(file('projects'))) return []
     return fs
@@ -99,28 +148,71 @@ export function createStore(dir: string, cipher: Cipher) {
 
     deleteProject: (id: string) => fs.rmSync(projectDir(id), { recursive: true, force: true }),
 
-    listRuns: (projectId: string) => read<RunSummary[]>(path.join(projectDir(projectId), 'runs.json'), []),
+    hasProject,
+
+    getSettings: (): AppSettings => settingsFrom(read<unknown>(file('settings.json'), null), DEFAULT_SETTINGS),
+
+    /** Fields with a wrong type keep their saved value. Returns what was saved. */
+    saveSettings(s: AppSettings): AppSettings {
+      const next = settingsFrom(s, settingsFrom(read<unknown>(file('settings.json'), null), DEFAULT_SETTINGS))
+      write(file('settings.json'), next)
+      return next
+    },
+
+    listRuns,
 
     saveRun(projectId: string, run: RunSummary) {
-      const f = path.join(projectDir(projectId), 'runs.json')
-      const runs = read<RunSummary[]>(f, []).filter((r) => r.id !== run.id)
-      write(f, [run, ...runs])
+      if (!hasProject(projectId)) return
+      const runs = listRuns(projectId).filter((r) => r.id !== run.id)
+      write(runsFile(projectId), [run, ...runs])
     },
 
-    appendEvent(projectId: string, runId: string, ev: OfficeEvent) {
-      const f = path.join(projectDir(projectId), 'runs', path.basename(runId) + '.jsonl')
-      fs.mkdirSync(path.dirname(f), { recursive: true })
-      fs.appendFileSync(f, JSON.stringify(ev) + '\n')
+    deleteRun(projectId: string, runId: string) {
+      if (!hasProject(projectId)) return
+      const runs = listRuns(projectId)
+      if (runs.some((r) => r.id === runId)) write(runsFile(projectId), runs.filter((r) => r.id !== runId))
+      fs.rmSync(runFile(projectId, runId), { force: true })
     },
+
+    /** At startup: runs still marked running were cut off when the app closed or crashed. Returns how many. */
+    reconcileRuns(): number {
+      let count = 0
+      for (const p of projects()) {
+        try {
+          const runs = listRuns(p.id)
+          if (!Array.isArray(runs) || !runs.some((r) => r?.state === 'running')) continue
+          const next = runs.map((r) => {
+            if (r?.state !== 'running') return r
+            const f = runFile(p.id, r.id)
+            // A crash can leave half a line behind; the event goes on a line of its own.
+            if (fs.existsSync(f) && !endsLine(f)) fs.appendFileSync(f, '\n')
+            appendEvent(p.id, r.id, { type: 'run', runId: r.id, state: 'stopped', reason: 'app_closed', at: Date.now() })
+            count++
+            return { ...r, state: 'stopped' as const }
+          })
+          write(runsFile(p.id), next)
+        } catch {
+          // A damaged office must not stop the app from starting.
+        }
+      }
+      return count
+    },
+
+    appendEvent,
 
     readRun(projectId: string, runId: string): OfficeEvent[] {
-      const f = path.join(projectDir(projectId), 'runs', path.basename(runId) + '.jsonl')
+      const f = runFile(projectId, runId)
       if (!fs.existsSync(f)) return []
-      return fs
-        .readFileSync(f, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as OfficeEvent)
+      const out: OfficeEvent[] = []
+      for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+        if (!line) continue
+        try {
+          out.push(JSON.parse(line) as OfficeEvent)
+        } catch {
+          // a line cut off by a crash; skip it
+        }
+      }
+      return out
     },
 
     /** One JSONL file per month keeps reads proportional to the range asked for. */
@@ -156,6 +248,7 @@ export function createStore(dir: string, cipher: Cipher) {
     },
 
     appendNote(projectId: string, agentId: string, note: string) {
+      if (!hasProject(projectId)) return
       const f = path.join(projectDir(projectId), 'notes', path.basename(agentId) + '.md')
       fs.mkdirSync(path.dirname(f), { recursive: true })
       fs.appendFileSync(f, `- ${note.replace(/\s+/g, ' ').trim()}\n`)

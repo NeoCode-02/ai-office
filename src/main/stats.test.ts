@@ -2,9 +2,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { UsageRecord } from '../shared/types'
+import { DEFAULT_SETTINGS, type UsageRecord } from '../shared/types'
 import { deepseek, moonshot, openrouter } from './balance'
-import { quotaUse, stats } from './stats'
+import { capUse, quotaUse, stats } from './stats'
 import { createStore } from './store'
 
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime()
@@ -51,6 +51,32 @@ describe('quota', () => {
   })
   it('is null without a quota', () => {
     expect(quotaUse(records, 'ds', { mode: 'payg' }, now)).toBeNull()
+  })
+})
+
+describe('spending caps', () => {
+  const now = at(2026, 10, 10, 18)
+  const records = [
+    rec({ at: at(2026, 10, 10, 0) - 1, usd: 1 }), // 23:59:59 yesterday
+    rec({ at: at(2026, 10, 10, 0), usd: 0.5 }), // midnight
+    rec({ at: at(2026, 10, 10, 17), usd: 0.25, providerId: 'other', projectId: 'p2' }),
+    rec({ at: at(2026, 10, 10, 9), usd: null }),
+    rec({ at: at(2026, 10, 1, 0), usd: 2 }), // the 1st, 00:00
+    rec({ at: at(2026, 10, 1, 0) - 1, usd: 4 }), // last moment of September
+    rec({ at: at(2026, 11, 1, 0), usd: 8 }) // next month
+  ]
+  it('sums every office and provider since local midnight and since the 1st', () => {
+    const c = capUse(records, { dailyCapUsd: 5, monthlyCapUsd: 50 }, now)
+    expect(c.day).toBeCloseTo(0.75)
+    expect(c.month).toBeCloseTo(3.75)
+    expect(c).toMatchObject({ dailyCapUsd: 5, monthlyCapUsd: 50 })
+  })
+  it('counts a damaged record as nothing instead of NaN', () => {
+    const c = capUse([rec({ at: now, usd: 'x' as unknown as number }), rec({ at: now, usd: 1 })], { dailyCapUsd: 0, monthlyCapUsd: 0 }, now)
+    expect(c).toEqual({ day: 1, month: 1, dailyCapUsd: 0, monthlyCapUsd: 0 })
+  })
+  it('is zero without usage', () => {
+    expect(capUse([], DEFAULT_SETTINGS, now)).toEqual({ day: 0, month: 0, dailyCapUsd: 0, monthlyCapUsd: 0 })
   })
 })
 
