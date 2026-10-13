@@ -61,7 +61,8 @@ const providerUrl = `http://127.0.0.1:${server.address().port}/v1`
 
 const require_ = (await import('node:module')).createRequire(import.meta.url)
 const electron = require_('electron')
-const args = [root, '--remote-debugging-port=0', ...(process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : [])]
+// CI Linux has neither a user-namespace sandbox nor a keyring for safeStorage.
+const args = [root, '--remote-debugging-port=0', ...(process.platform === 'linux' && process.env.CI ? ['--no-sandbox', '--password-store=basic'] : [])]
 const app = spawn(electron, args, { env: { ...process.env, AI_OFFICE_DATA: data, ELECTRON_ENABLE_LOGGING: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
 let appLog = ''
 app.stdout.on('data', (d) => (appLog += d))

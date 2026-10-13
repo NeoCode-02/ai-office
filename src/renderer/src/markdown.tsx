@@ -309,6 +309,9 @@ const RULES: Rule[] = [
   { re: /(?<![\p{L}\p{N}_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\p{L}\p{N}_])/u, make: wrap('em') }
 ]
 
+/** The rules as global regexes, so a search can start anywhere in the string (lookbehind sees the real text). */
+const SEARCH = RULES.map((r) => new RegExp(r.re.source, r.re.flags.includes('g') ? r.re.flags : `${r.re.flags}g`))
+
 function inline(s: string, key: string, depth: number, links: boolean): ReactNode[] {
   const out: ReactNode[] = []
   // Adjacent strings would render with comment separators; keep text in one piece.
@@ -317,26 +320,33 @@ function inline(s: string, key: string, depth: number, links: boolean): ReactNod
     if (typeof n === 'string' && typeof out[last] === 'string') out[last] = (out[last] as string) + n
     else out.push(n)
   }
-  let rest = s
+  // Each rule searches the whole string from `pos` and its result is kept until `pos` passes it: a rule
+  // with no match is never run again, so text full of unclosed markers stays linear.
+  const found: (RegExpExecArray | null | undefined)[] = []
+  let pos = 0
   let n = 0
-  while (rest) {
-    let best: { m: RegExpExecArray; rule: Rule } | null = null
+  while (pos < s.length) {
+    let best = -1
     if (depth < MAX_DEPTH) {
-      for (const rule of RULES) {
-        if (rule.link && !links) continue
-        const m = rule.re.exec(rest)
-        if (m && (!best || m.index < best.m.index)) best = { m, rule }
+      for (let i = 0; i < RULES.length; i++) {
+        if (RULES[i].link && !links) continue
+        let m = found[i]
+        if (m === undefined || (m && m.index < pos)) {
+          SEARCH[i].lastIndex = pos
+          m = found[i] = SEARCH[i].exec(s)
+        }
+        if (m && (best < 0 || m.index < found[best]!.index)) best = i
       }
     }
-    if (!best) {
-      push(rest)
+    if (best < 0) {
+      push(s.slice(pos))
       break
     }
-    const { m, rule } = best
-    if (m.index) push(rest.slice(0, m.index))
-    const made = rule.make(m, `${key}.${n++}`, depth, links)
+    const m = found[best]!
+    if (m.index > pos) push(s.slice(pos, m.index))
+    const made = RULES[best].make(m, `${key}.${n++}`, depth, links)
     push(made ? made.node : m[0])
-    rest = rest.slice(m.index + (made?.used ?? m[0].length))
+    pos = m.index + (made?.used ?? m[0].length)
   }
   return out
 }

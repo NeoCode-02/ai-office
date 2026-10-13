@@ -27,7 +27,11 @@ if (!primary) app.quit()
 
 const dataDir = path.join(app.getPath('userData'), 'data')
 const cipher = {
-  encrypt: (s: string) => safeStorage.encryptString(s).toString('base64'),
+  encrypt: (s: string) => {
+    // Linux without GNOME Keyring/KWallet: say so instead of Chromium's raw error.
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('E_NO_KEYCHAIN')
+    return safeStorage.encryptString(s).toString('base64')
+  },
   decrypt: (s: string) => safeStorage.decryptString(Buffer.from(s, 'base64'))
 }
 const store = createStore(dataDir, cipher)
