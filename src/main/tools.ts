@@ -1,8 +1,14 @@
-import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { ToolName } from '../shared/types'
+import type { Sandbox, ToolName } from '../shared/types'
+import { unifiedDiff } from './diff'
+import { clip, exec } from './exec'
+import { webFetch } from './fetch'
 import type { ToolCall, ToolDef } from './providers'
+import { searchFiles } from './search'
+
+export { clip } from './exec'
+export { htmlToText, webFetch } from './fetch'
 
 const str = (description: string) => ({ type: 'string', description })
 const params = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object' as const, properties, required })
@@ -10,22 +16,24 @@ const params = (properties: Record<string, unknown>, required: string[]) => ({ t
 export const TOOL_DEFS: Record<ToolName, ToolDef> = {
   list_files: {
     name: 'list_files',
-    description: 'List files and folders in the shared workspace (recursive, skips node_modules/.git).',
+    description:
+      'List files and folders in the shared workspace (recursive, up to 500 entries, skips node_modules/.git). Folders end with "/", symbolic links with "@" (links are not followed).',
     parameters: params({ path: str('Folder relative to the workspace, "." for root') }, ['path'])
   },
   read_file: {
     name: 'read_file',
-    description: 'Read a text file from the shared workspace.',
+    description: 'Read a text file from the shared workspace (up to 5 MB; for bigger files use search_files on the file).',
     parameters: params({ path: str('File path relative to the workspace') }, ['path'])
   },
   search_files: {
     name: 'search_files',
-    description: 'Search file contents in the workspace with a regular expression (case-insensitive). Returns path:line: text for each match.',
-    parameters: params({ pattern: str('Regular expression'), path: str('Folder to search, "." for the whole workspace') }, ['pattern', 'path'])
+    description:
+      'Search file contents with a regular expression (case-insensitive) in a folder or in one file. Returns path:line: text for each match (up to 200). Skips node_modules, .git, symbolic links, binary files and, in folders, files over 1 MB.',
+    parameters: params({ pattern: str('Regular expression'), path: str('Folder or file to search, "." for the whole workspace') }, ['pattern', 'path'])
   },
   write_file: {
     name: 'write_file',
-    description: 'Create or overwrite a text file in the shared workspace. Parent folders are created.',
+    description: 'Create or overwrite a text file in the shared workspace. Parent folders are created. Files inside .git cannot be written.',
     parameters: params({ path: str('File path relative to the workspace'), content: str('Full file content') }, ['path', 'content'])
   },
   edit_file: {
@@ -38,12 +46,13 @@ export const TOOL_DEFS: Record<ToolName, ToolDef> = {
   },
   run_command: {
     name: 'run_command',
-    description: `Run a shell command in the workspace folder (${process.platform === 'win32' ? 'Windows cmd.exe' : 'sh'}; 2 min timeout). Use for builds, tests, git, scripts.`,
+    description: `Run a shell command in the workspace folder (${process.platform === 'win32' ? 'Windows cmd.exe' : 'sh'}). It is stopped after 2 minutes (10 minutes in the Docker sandbox). Input is closed, so commands must not wait for answers. Background processes are stopped when the command ends unless their output goes to a file. Use for builds, tests, git, scripts.`,
     parameters: params({ command: str('The command line') }, ['command'])
   },
   web_fetch: {
     name: 'web_fetch',
-    description: 'Download a web page or file over http(s) and return its text (HTML is converted to plain text). Use for documentation, APIs, references.',
+    description:
+      'Download a web page or file over http(s) and return its text (HTML is converted to plain text, at most 2 MB is read). Addresses on this computer or the local network need permission from the owner. Use for documentation, APIs, references.',
     parameters: params({ url: str('Full http:// or https:// URL') }, ['url'])
   },
   message: {
@@ -89,101 +98,141 @@ export interface ToolCtx {
   plan?(text: string): string
   approve(command: string): Promise<boolean>
   skill(name: string): { body: string; dir?: string } | undefined
+  /** Stops a running command, search or download. */
+  signal?: AbortSignal
+  /** Where run_command executes; missing = on this computer. */
+  sandbox?: Sandbox
+  /** Asked before web_fetch opens this computer or the local network; missing = refused. */
+  approveFetch?(url: string): Promise<boolean>
 }
 
-const MAX_OUT = 20_000
-const clip = (s: string, n = MAX_OUT) => (s.length > n ? s.slice(0, n) + `\n…[${s.length - n} more characters truncated]` : s)
+/** diff: unified diff of a write_file / edit_file; changed: the file, workspace-relative with "/". */
+export interface ToolOutcome {
+  content: string
+  isError: boolean
+  diff?: string
+  changed?: string
+}
 
-/** Rejects paths that escape `root`, including through symlinks. */
-export function inside(root: string, p: string): string {
+const MAX_READ = 5 * 1024 * 1024
+const MAX_LIST = 500
+const GIT_ONLY = 'Writing inside .git is not allowed; use git commands with run_command'
+/** ".git" as Windows also accepts it: trailing dots/spaces, an NTFS stream suffix, the 8.3 short name. */
+const GIT_SEGMENT = /^(\.git[. ]*(:.*)?|git~\d+)$/i
+
+const isMissing = (e: unknown) => ['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '')
+
+/** Where `p` really points: symlinks resolved, including in the part of the path that does not exist yet. */
+function realTarget(p: string, depth = 0): string {
+  try {
+    return fs.realpathSync(p)
+  } catch (e) {
+    if (!isMissing(e)) throw e
+  }
+  let st: fs.Stats | undefined
+  try {
+    st = fs.lstatSync(p)
+  } catch (e) {
+    if (!isMissing(e)) throw e
+  }
+  // A link to something missing: writing through it would create its target.
+  if (st?.isSymbolicLink()) {
+    if (depth > 40) throw new Error(`Too many symbolic links in "${p}"`)
+    return realTarget(path.resolve(path.dirname(p), fs.readlinkSync(p)), depth + 1)
+  }
+  const parent = path.dirname(p)
+  return parent === p ? p : path.join(realTarget(parent, depth), path.basename(p))
+}
+
+function resolveIn(root: string, p: string): { base: string; target: string } {
+  if (p.includes('\0') || root.includes('\0')) throw new Error('Invalid path: it contains a NUL character')
   const base = fs.realpathSync(root)
-  let target = path.resolve(base, p)
-  if (fs.existsSync(target)) target = fs.realpathSync(target)
-  const rel = path.relative(base, target)
-  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+  const target = realTarget(path.resolve(base, p))
+  const r = path.relative(base, target)
+  if (r === '..' || r.startsWith('..' + path.sep) || path.isAbsolute(r)) {
     throw new Error(`"${p}" is outside the allowed folder`)
   }
-  return target
+  return { base, target }
 }
 
-function walk(dir: string, visit: (full: string, isDir: boolean) => boolean) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === 'node_modules' || e.name === '.git') continue
-    const full = path.join(dir, e.name)
-    if (!visit(full, e.isDirectory())) return false
-    if (e.isDirectory() && walk(full, visit) === false) return false
-  }
+/** Rejects paths that escape `root`, including through symlinks (also in not-yet-existing parts). */
+export function inside(root: string, p: string): string {
+  return resolveIn(root, p).target
 }
 
 const rel = (root: string, f: string) => path.relative(root, f).replaceAll('\\', '/')
 
-function listTree(dir: string, root: string): string[] {
+/** A file the agents may write: inside the workspace and not inside any .git folder. */
+function writable(root: string, p: string): { file: string; changed: string } {
+  const { base, target } = resolveIn(root, p)
+  const r = path.relative(base, target)
+  if (r.split(/[\\/]/).some((s) => GIT_SEGMENT.test(s))) throw new Error(GIT_ONLY)
+  return { file: target, changed: rel(base, target) }
+}
+
+/** Never follows symbolic links: they are reported to `visit` but not entered. */
+function walk(dir: string, visit: (full: string, e: fs.Dirent) => boolean): boolean {
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return true
+  }
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  for (const e of entries) {
+    if (e.name === 'node_modules' || e.name.toLowerCase() === '.git') continue
+    const full = path.join(dir, e.name)
+    if (!visit(full, e)) return false
+    if (e.isDirectory() && !e.isSymbolicLink() && !walk(full, visit)) return false
+  }
+  return true
+}
+
+function listTree(dir: string, root: string, links: boolean): string[] {
+  if (!fs.statSync(dir).isDirectory()) throw new Error(`"${rel(root, dir) || '.'}" is a file, not a folder; use read_file`)
   const out: string[] = []
-  walk(dir, (full, isDir) => {
-    out.push(rel(root, full) + (isDir ? '/' : ''))
-    return out.length < 500
+  const complete = walk(dir, (full, e) => {
+    if (e.isSymbolicLink() && !links) return true
+    if (out.length >= MAX_LIST) return false
+    out.push(rel(root, full) + (e.isSymbolicLink() ? '@' : e.isDirectory() ? '/' : ''))
+    return true
   })
+  if (!complete) out.push(`… more entries not shown; list a subfolder`)
   return out
 }
 
-function search(root: string, dir: string, pattern: string): string {
-  const re = new RegExp(pattern, 'i')
-  const hits: string[] = []
-  walk(dir, (full, isDir) => {
-    if (isDir || fs.statSync(full).size > 1_000_000) return true
-    const text = fs.readFileSync(full, 'utf8')
-    if (text.includes('\0')) return true
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length && hits.length < 200; i++) {
-      if (re.test(lines[i])) hits.push(`${rel(root, full)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
-    }
-    return hits.length < 200
-  })
-  return hits.join('\n') || 'No matches'
+type Text = { text: string; size: number } | { binary: true; size: number }
+
+/** A regular file's text; binary files (NUL in the first 8 KB) are not decoded. */
+function readText(f: string): Text {
+  const st = fs.statSync(f)
+  if (st.isDirectory()) throw new Error('This is a folder; use list_files')
+  if (!st.isFile()) throw new Error('This is not a regular file')
+  if (st.size > MAX_READ) {
+    throw new Error(`The file is too large to read (${(st.size / 1024 / 1024).toFixed(1)} MB, limit 5 MB); use search_files on it to find the lines you need`)
+  }
+  const buf = fs.readFileSync(f)
+  if (buf.subarray(0, 8192).includes(0)) return { binary: true, size: buf.length }
+  return { text: buf.toString('utf8'), size: buf.length }
 }
 
-const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' }
+const shown = (t: Text) => ('binary' in t ? `binary file, ${t.size} bytes` : clip(t.text, 100_000))
 
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, '')
-    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_, e: string) => ENTITIES[e])
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s*\n+/g, '\n\n')
-    .trim()
+/** The current text of a file about to be overwritten, for the diff; undefined when it cannot be shown. */
+function previous(f: string): string | undefined {
+  try {
+    const t = readText(f)
+    return 'binary' in t ? undefined : t.text
+  } catch (e) {
+    return isMissing(e) ? '' : undefined
+  }
 }
 
-export async function webFetch(url: string): Promise<string> {
-  const u = new URL(url)
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('Only http and https URLs are allowed')
-  const res = await fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'AI-Office' } })
-  const type = res.headers.get('content-type') ?? ''
-  if (!/text|json|xml|javascript/.test(type)) return `HTTP ${res.status}, ${type || 'unknown type'}: binary content not shown`
-  const body = await res.text()
-  return clip(`HTTP ${res.status}\n\n${type.includes('html') ? htmlToText(body) : body}`, 100_000)
-}
-
-function exec(command: string, cwd: string): Promise<string> {
-  return new Promise((resolve) => {
-    const child = spawn(command, { cwd, shell: true, timeout: 120_000, windowsHide: true })
-    let out = ''
-    const add = (d: Buffer) => {
-      if (out.length < MAX_OUT * 2) out += d.toString()
-    }
-    child.stdout.on('data', add)
-    child.stderr.on('data', add)
-    child.on('error', (e) => resolve(`Error: ${e.message}`))
-    child.on('close', (code, signal) => resolve(clip(`${out}\n[exit ${code ?? signal}]`.trim())))
-  })
-}
-
-const ok = (content: string) => ({ content, isError: false })
-const fail = (content: string) => ({ content, isError: true })
+const ok = (content: string): ToolOutcome => ({ content, isError: false })
+const fail = (content: string): ToolOutcome => ({ content, isError: true })
 
 /** Runs one built-in call; failures come back as error results so the agent can recover. */
-export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx): Promise<{ content: string; isError: boolean }> {
+export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx): Promise<ToolOutcome> {
   const def = TOOL_DEFS[call.name as ToolName]
   if (!def || !allowed.includes(def.name as ToolName)) return fail(`Tool "${call.name}" is not available to you`)
   const a = call.input
@@ -195,31 +244,39 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
 
   try {
     switch (def.name as ToolName) {
-      case 'list_files':
-        return ok(listTree(inside(ctx.root, s('path')), fs.realpathSync(ctx.root)).join('\n') || '(empty)')
+      case 'list_files': {
+        const { base, target } = resolveIn(ctx.root, s('path'))
+        return ok(listTree(target, base, true).join('\n') || '(empty)')
+      }
       case 'read_file':
-        return ok(clip(fs.readFileSync(inside(ctx.root, s('path')), 'utf8'), 100_000))
-      case 'search_files':
-        return ok(search(fs.realpathSync(ctx.root), inside(ctx.root, s('path')), s('pattern')))
+        return ok(shown(readText(inside(ctx.root, s('path')))))
+      case 'search_files': {
+        const { base, target } = resolveIn(ctx.root, s('path'))
+        return ok(await searchFiles(base, target, s('pattern'), { signal: ctx.signal }))
+      }
       case 'write_file': {
-        const f = inside(ctx.root, s('path'))
-        fs.mkdirSync(path.dirname(f), { recursive: true })
-        fs.writeFileSync(f, s('content'))
-        return ok(`Wrote ${s('path')}`)
+        const { file, changed } = writable(ctx.root, s('path'))
+        const before = previous(file)
+        fs.mkdirSync(path.dirname(file), { recursive: true })
+        fs.writeFileSync(file, s('content'))
+        return { ...ok(`Wrote ${s('path')}`), changed, diff: before === undefined ? undefined : unifiedDiff(changed, before, s('content')) }
       }
       case 'edit_file': {
-        const f = inside(ctx.root, s('path'))
-        const text = fs.readFileSync(f, 'utf8')
-        const n = text.split(s('old_text')).length - 1
+        const { file, changed } = writable(ctx.root, s('path'))
+        const t = readText(file)
+        if ('binary' in t) return fail('This is a binary file; it cannot be edited as text')
+        if (!s('old_text')) return fail('old_text must not be empty')
+        const n = t.text.split(s('old_text')).length - 1
         if (n !== 1) return fail(`old_text found ${n} times; it must match exactly once`)
-        fs.writeFileSync(f, text.replace(s('old_text'), () => s('new_text')))
-        return ok(`Edited ${s('path')}`)
+        const after = t.text.replace(s('old_text'), () => s('new_text'))
+        fs.writeFileSync(file, after)
+        return { ...ok(`Edited ${s('path')}`), changed, diff: unifiedDiff(changed, t.text, after) }
       }
       case 'run_command':
         if (!(await ctx.approve(s('command')))) return fail('The owner declined this command')
-        return ok(await exec(s('command'), ctx.root))
+        return await exec(s('command'), ctx.root, { signal: ctx.signal, sandbox: ctx.sandbox })
       case 'web_fetch':
-        return ok(await webFetch(s('url')))
+        return ok(await webFetch(s('url'), { signal: ctx.signal, approveLocal: ctx.approveFetch && ((url) => ctx.approveFetch!(url)) }))
       case 'message': {
         const err = ctx.send((a.to as unknown[]).map(String), s('text'))
         return err ? fail(err) : ok('Sent')
@@ -230,13 +287,13 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
       case 'use_skill': {
         const sk = ctx.skill(s('name'))
         if (!sk) return fail(`No skill named "${s('name')}"`)
-        const files = sk.dir ? listTree(sk.dir, sk.dir).filter((f) => f !== 'SKILL.md') : []
+        const files = sk.dir ? listTree(sk.dir, sk.dir, false).filter((f) => f !== 'SKILL.md') : []
         return ok(sk.body + (files.length ? `\n\nFiles in this skill (read_skill_file):\n${files.join('\n')}` : ''))
       }
       case 'read_skill_file': {
         const sk = ctx.skill(s('name'))
         if (!sk?.dir) return fail(`Skill "${s('name')}" has no files`)
-        return ok(clip(fs.readFileSync(inside(sk.dir, s('path')), 'utf8'), 100_000))
+        return ok(shown(readText(inside(sk.dir, s('path')))))
       }
       case 'report_to_user':
         ctx.report(s('summary'))
