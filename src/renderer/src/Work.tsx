@@ -1,33 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { SYSTEM, USER, type Agent, type AgentStatus, type ModelRef, type OfficeEvent, type Project, type Provider, type RunSummary } from '../../shared/types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SYSTEM, USER, type Agent, type AgentStatus, type OfficeEvent, type Project, type Provider, type RunSummary } from '../../shared/types'
 import type { Live } from './App'
 import { errText, useT } from './i18n'
-import { ModelInput } from './Team'
-import { Markdown } from './markdown'
-import { Avatar, baseName, clock, dateTime, Empty, Icon, Modal, Sheet, tokens, usd, type IconName } from './ui'
-
-const TOOL_ICON: Record<string, IconName> = {
-  list_files: 'folder',
-  read_file: 'eye',
-  search_files: 'search',
-  write_file: 'file',
-  edit_file: 'edit',
-  run_command: 'terminal',
-  web_fetch: 'globe',
-  remember: 'bookmark',
-  use_skill: 'book',
-  read_skill_file: 'book'
-}
-
-type ToolEv = Extract<OfficeEvent, { type: 'tool' }>
-type Item =
-  | { kind: 'message'; e: Extract<OfficeEvent, { type: 'message' }> }
-  | { kind: 'tools'; id: string; agentId: string; list: ToolEv[] }
-  | { kind: 'approval'; e: Extract<OfficeEvent, { type: 'approval' }>; answer?: boolean }
-  | { kind: 'end'; e: Extract<OfficeEvent, { type: 'run' }> }
-  | { kind: 'notice'; e: Extract<OfficeEvent, { type: 'notice' }> }
-  | { kind: 'switch'; e: Extract<OfficeEvent, { type: 'switch' }> }
-  | { kind: 'blocked'; e: Extract<OfficeEvent, { type: 'blocked' }>; resolved: boolean }
+import { Avatar, dateTime, Empty, Icon, Sheet, usd } from './ui'
+import { BudgetPill, RaiseBudget } from './work/Budget'
+import { ChangesSheet, useRunChanges } from './work/Changes'
+import { Composer } from './work/Composer'
+import { FeedItem, type FeedCtx } from './work/FeedItem'
+import { HistoryModal } from './work/History'
+import { LiveReplies, useDeltas } from './work/Live'
+import { approvalShortcut, buildItems, errCode, forMember, isEditable, summarize, type Item } from './work/logic'
 
 interface Props {
   project: Project
@@ -38,105 +20,178 @@ interface Props {
   onSave(p: Project): Promise<void>
 }
 
+type Panel = { kind: 'person'; id: string } | { kind: 'changes' } | null
+const NO_DELTAS: Record<string, string> = {}
+
 export default function Work({ project, providers, live, notify, goTeam, onSave }: Props) {
   const t = useT()
+  const projectId = project.id
   const [text, setText] = useState('')
   const [focus, setFocus] = useState<string | null>(null)
-  const [person, setPerson] = useState<string | null>(null)
+  const [panel, setPanel] = useState<Panel>(null)
   const [fresh, setFresh] = useState(false)
   const [viewing, setViewing] = useState<{ run: RunSummary; events: OfficeEvent[] } | null>(null)
-  const [history, setHistory] = useState<RunSummary[] | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Approvals and plans answered here, until the main process confirms them.
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set())
+  // A message the budget refused; it is sent again once the budget is raised.
+  const [refused, setRefused] = useState<{ text: string; to?: string } | null>(null)
   const feedRef = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  // App hands a new onSave on every render; rows get a stable one so they can skip re-rendering.
+  const saveRef = useRef(onSave)
+  useEffect(() => {
+    saveRef.current = onSave
+  })
+  const deltas = useDeltas(projectId)
 
   const events = useMemo(() => viewing?.events ?? live?.events ?? [], [viewing, live])
   const byId = useMemo(() => new Map(project.agents.map((a) => [a.id, a])), [project.agents])
   const ceo = project.agents.find((a) => !a.reportsTo)
+  const s = useMemo(() => summarize(events), [events])
+  const allItems = useMemo(() => buildItems(events), [events])
+  const items = useMemo(() => forMember(allItems, focus), [allItems, focus])
+  const liveRunning = useMemo(() => {
+    const last = live?.events.findLast((e) => e.type === 'run')
+    return last?.type === 'run' && last.state === 'running'
+  }, [live])
 
-  const s = useMemo(() => {
-    const status = new Map<string, AgentStatus>()
-    const cost = new Map<string, number>()
-    let total = 0
-    let toks = 0
-    let unpriced = 0
-    let state: string | null = null
-    for (const e of events) {
-      if (e.type === 'status') status.set(e.agentId, e.status)
-      if (e.type === 'cost') {
-        cost.set(e.agentId, (cost.get(e.agentId) ?? 0) + (e.usd ?? 0))
-        total += e.usd ?? 0
-        if (e.usd === null) unpriced++
-        toks += e.usage ? e.usage.in + e.usage.cacheRead + e.usage.cacheWrite + e.usage.out : (e.inTok ?? 0) + (e.outTok ?? 0)
-      }
-      if (e.type === 'run') state = e.state
-    }
-    const goal = events.find((e) => e.type === 'message' && e.from === USER)
-    return { status, cost, total, toks, unpriced, state, goal: goal?.type === 'message' ? goal.text : '' }
-  }, [events])
-
-  const items = useMemo(() => {
-    const out: Item[] = []
-    const answers = new Map<string, boolean>()
-    const unblocked = new Set<string>()
-    for (const e of events) {
-      if (e.type === 'approval_done') answers.set(e.id, e.approved)
-      if (e.type === 'unblocked') unblocked.add(e.id)
-    }
-    for (const e of events) {
-      if (e.type === 'message') out.push({ kind: 'message', e })
-      else if (e.type === 'tool') {
-        const last = out.at(-1)
-        if (last?.kind === 'tools' && last.agentId === e.agentId) last.list.push(e)
-        else out.push({ kind: 'tools', id: e.id, agentId: e.agentId, list: [e] })
-      } else if (e.type === 'approval') out.push({ kind: 'approval', e, answer: answers.get(e.id) })
-      else if (e.type === 'run' && e.state !== 'running') out.push({ kind: 'end', e })
-      else if (e.type === 'notice') {
-        // Only the latest retry of a member is worth a line.
-        const last = out.at(-1)
-        if (last?.kind === 'notice' && last.e.agentId === e.agentId) out[out.length - 1] = { kind: 'notice', e }
-        else out.push({ kind: 'notice', e })
-      } else if (e.type === 'switch') out.push({ kind: 'switch', e })
-      else if (e.type === 'blocked') out.push({ kind: 'blocked', e, resolved: unblocked.has(e.id) })
-    }
-    if (!focus) return out
-    return out.filter((i) =>
-      i.kind === 'message' ? i.e.from === focus || i.e.to.includes(focus) : i.kind === 'tools' ? i.agentId === focus : i.kind === 'end' ? true : i.e.agentId === focus
-    )
-  }, [events, focus])
-
-  const running = !viewing && s.state === 'running'
   const showStart = !viewing && (fresh || !live)
   const canContinue = !showStart && !viewing
+  const running = !viewing && s.lastRun?.state === 'running'
+  const waitingPlan = !viewing && s.lastRun?.state === 'done' && s.lastRun.reason === 'plan'
+  const runId = viewing?.run.id ?? (showStart ? null : (live?.runId ?? null))
+  const changes = useRunChanges(projectId, runId, running, s.writes, s.lastRun && s.lastRun.state !== 'running' ? s.lastRun.at : 0)
+  const liveDeltas = running ? deltas : NO_DELTAS
+
+  const nameOf = useCallback((id: string) => (id === USER ? t.work.you : id === SYSTEM ? t.work.system : (byId.get(id)?.name ?? t.work.formerMember)), [t, byId])
+  const save = useCallback((p: Project) => saveRef.current(p), [])
+
+  const onAnswer = useCallback(
+    async (id: string, ok: boolean, always?: boolean) => {
+      setAnswered((a) => new Set(a).add(id))
+      try {
+        await window.office.answer(projectId, id, ok, always)
+      } catch (e) {
+        notify(errText(e))
+        setAnswered((a) => new Set([...a].filter((x) => x !== id)))
+      }
+    },
+    [projectId, notify]
+  )
+
+  const onPlan = useCallback(
+    async (id: string, approved: boolean, feedback?: string) => {
+      setAnswered((a) => new Set(a).add(id))
+      try {
+        await window.office.answerPlan(projectId, id, approved, feedback)
+        return true
+      } catch (e) {
+        notify(errText(e))
+        setAnswered((a) => new Set([...a].filter((x) => x !== id)))
+        return false
+      }
+    },
+    [projectId, notify]
+  )
+
+  const ctx = useMemo<FeedCtx>(
+    () => ({ project, providers, byId, nameOf, running, viewing: viewing !== null, onSave: save, notify, onAnswer, onPlan }),
+    [project, providers, byId, nameOf, running, viewing, save, notify, onAnswer, onPlan]
+  )
+
+  const pending = running ? allItems.filter((i): i is Extract<Item, { kind: 'approval' }> => i.kind === 'approval' && !i.done && !answered.has(i.e.id)) : []
+  // Only for a card the owner can see: not from the new-task screen.
+  const only = pending.length === 1 && !showStart ? pending[0].e.id : null
+
+  useEffect(() => {
+    if (!only || historyOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      const act = approvalShortcut(e)
+      if (!act || isEditable(document.activeElement)) return
+      e.preventDefault()
+      void onAnswer(only, act === 'allow')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [only, historyOpen, onAnswer])
 
   useEffect(() => {
     const el = feedRef.current
     if (el && stick.current) el.scrollTop = el.scrollHeight
-  }, [items.length])
+  }, [items.length, events.length, liveDeltas])
 
-  const nameOf = (id: string) => (id === USER ? t.work.you : id === SYSTEM ? t.work.system : (byId.get(id)?.name ?? t.work.formerMember))
-  const working = project.agents.filter((a) => s.status.get(a.id) === 'working')
   const target = focus && focus !== ceo?.id ? byId.get(focus) : ceo
+  const overBudget = project.budgetUsd > 0 && s.total >= project.budgetUsd
 
   const send = async () => {
     const msg = text.trim()
     if (!msg || busy) return
+    const to = canContinue && target && target.id !== ceo?.id ? target.id : undefined
     setBusy(true)
     try {
-      if (canContinue) await window.office.post(project.id, msg, target && target.id !== ceo?.id ? target.id : undefined)
+      if (canContinue) await window.office.post(projectId, msg, to)
       else {
-        await window.office.start(project.id, msg)
+        await window.office.start(projectId, msg)
         setFresh(false)
         setViewing(null)
         setFocus(null)
       }
+      setRefused(null)
       setText('')
       stick.current = true
     } catch (e) {
-      notify(errText(e, t))
+      if (canContinue && errCode(e) === 'E_BUDGET_SPENT') {
+        setRefused({ text: msg, to })
+        // The inline control explains it when the numbers agree; otherwise say what main said.
+        if (!overBudget) notify(errText(e, t))
+      } else notify(errText(e, t))
     } finally {
       setBusy(false)
     }
+  }
+
+  const raise = async (budgetUsd: number) => {
+    try {
+      await onSave({ ...project, budgetUsd })
+    } catch (e) {
+      notify(errText(e, t))
+      return
+    }
+    const p = refused
+    if (!p) return notify(t.run.budgetSaved)
+    try {
+      await window.office.post(projectId, p.text, p.to)
+      setRefused(null)
+      setText((cur) => (cur.trim() === p.text ? '' : cur))
+      stick.current = true
+    } catch (e) {
+      if (errCode(e) !== 'E_BUDGET_SPENT') setRefused(null)
+      notify(errText(e, t))
+    }
+  }
+
+  const openRun = async (r: RunSummary) => {
+    try {
+      const run = r.id === live?.runId ? null : { run: r, events: await window.office.readRun(projectId, r.id) }
+      setViewing(run)
+      setFresh(false)
+      setHistoryOpen(false)
+      setPanel(null)
+      stick.current = true
+    } catch (e) {
+      notify(errText(e, t))
+    }
+  }
+
+  const runAgain = (goal: string) => {
+    setHistoryOpen(false)
+    setViewing(null)
+    setFocus(null)
+    setPanel(null)
+    setFresh(true)
+    setText(goal)
   }
 
   if (!project.agents.length) {
@@ -153,56 +208,104 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
       onChange={setText}
       onSend={send}
       busy={busy}
+      autoFocus={fresh}
       placeholder={canContinue ? t.work.placeholderTo(target?.name ?? '') : t.work.placeholderGoal}
       hint={project.approval === 'ask' ? t.work.approvalAsk : t.work.approvalAuto}
     />
   )
 
-  const attention = running && [...s.status.values()].includes('blocked')
-  const stateLabel = viewing ? t.work.viewing : attention ? t.work.attention : running ? t.work.running : s.state === 'stopped' ? t.work.stopped : s.state === 'done' ? t.work.done : t.work.idle
+  const attention = running && ([...s.status.values()].includes('blocked') || pending.length > 0)
+  const state = s.lastRun?.state
+  const stateLabel = viewing
+    ? t.work.viewing
+    : attention
+      ? t.work.attention
+      : running
+        ? t.work.running
+        : showStart
+          ? t.work.idle
+          : waitingPlan
+            ? t.run.waitingPlan
+            : state === 'stopped' || state === 'error'
+              ? t.work.stopped
+              : state === 'done'
+                ? t.work.done
+                : t.work.idle
+  const dot = attention ? 'warn' : running ? 'live' : showStart ? '' : waitingPlan ? 'wait' : state === 'done' ? 'ok' : ''
   const shown = project.agents.slice(0, 7)
+  const changesOpen = panel?.kind === 'changes'
+  const person = panel?.kind === 'person' ? byId.get(panel.id) : undefined
+  const showRaise = canContinue && project.budgetUsd > 0 && (refused !== null || (s.lastRun?.reason === 'budget' && overBudget))
 
   return (
     <div className="work">
       <div className="workbar">
         <span className="status">
-          <span className={`dot ${attention ? 'warn' : running ? 'live' : s.state === 'done' ? 'ok' : ''}`} />
+          <span className={`dot ${dot}`} />
           {stateLabel}
         </span>
-        {!showStart && <span className="goal ellipsis" title={s.goal}>{viewing ? `${dateTime(viewing.run.startedAt)} · ${s.goal}` : s.goal}</span>}
+        {!showStart && (
+          <span className="goal ellipsis" title={s.goal}>
+            {viewing ? `${dateTime(viewing.run.startedAt)} · ${s.goal}` : s.goal}
+          </span>
+        )}
         {focus && (
           <span className="filter-chip">
             {nameOf(focus)}
-            <button onClick={() => setFocus(null)} aria-label={t.common.close}><Icon name="x" size={12} /></button>
+            <button onClick={() => setFocus(null)} aria-label={t.common.close}>
+              <Icon name="x" size={12} />
+            </button>
           </span>
         )}
         <span className="spacer" />
         <div className="stack-avatars">
           {shown.map((a) => (
-            <button key={a.id} onClick={() => setPerson(a.id)} title={`${a.name} · ${a.title}`}>
-              <Avatar name={a.name} seed={a.id} size={26} status={showStart ? undefined : s.status.get(a.id)} />
+            <button key={a.id} onClick={() => setPanel({ kind: 'person', id: a.id })} title={`${a.name} · ${a.title}`} aria-label={`${a.name} · ${a.title}`}>
+              <Avatar name={a.name} seed={a.id} size={26} status={running ? s.status.get(a.id) : undefined} />
             </button>
           ))}
           {project.agents.length > shown.length && <span className="stack-more">+{project.agents.length - shown.length}</span>}
         </div>
-        {!showStart && (
-          <span className="pill" title={`${tokens(s.toks)} ${t.work.tokens}${s.unpriced ? ` · ${t.work.unpriced(s.unpriced)}` : ''}`}>
-            {usd(s.total)}{s.unpriced > 0 && '+'}
-            {project.budgetUsd > 0 && <span className="faint">{t.work.budget(project.budgetUsd)}</span>}
-          </span>
-        )}
+        {!showStart && <BudgetPill total={s.total} toks={s.toks} unpriced={s.unpriced} budget={project.budgetUsd} />}
         {running && (
-          <button className="btn sm" onClick={() => window.office.stop(project.id)}>
+          <button className="btn sm" onClick={() => window.office.stop(projectId).catch((e: unknown) => notify(errText(e, t)))}>
             <Icon name="stop" size={12} /> {t.work.stop}
           </button>
         )}
-        {viewing && <button className="btn sm" onClick={() => setViewing(null)}>{t.work.backToCurrent}</button>}
+        {runId && (
+          <button
+            type="button"
+            className={`btn sm changes-btn ${changesOpen ? 'on' : ''}`}
+            aria-label={t.run.changesAria(changes.count)}
+            aria-expanded={changesOpen}
+            onClick={() => {
+              if (changesOpen) return setPanel(null)
+              setPanel({ kind: 'changes' })
+              changes.refresh()
+            }}
+          >
+            <Icon name="diff" size={13} /> {t.run.changes}
+            {changes.count !== null && changes.count > 0 && <span className="count">{changes.count}</span>}
+          </button>
+        )}
+        {(viewing || (fresh && live)) && (
+          <button
+            className="btn sm"
+            onClick={() => {
+              setViewing(null)
+              setFresh(false)
+              stick.current = true
+            }}
+          >
+            {t.work.backToCurrent}
+          </button>
+        )}
         {!viewing && !showStart && !running && (
           <button className="btn sm" onClick={() => setFresh(true)}>
             <Icon name="plus" size={13} /> {t.work.newTask}
           </button>
         )}
-        <button className="btn quiet icon sm" title={t.work.history} aria-label={t.work.history} onClick={async () => setHistory(await window.office.listRuns(project.id))}>
+        <button className="btn quiet icon sm" title={t.work.history} aria-label={t.work.history} onClick={() => setHistoryOpen(true)}>
           <Icon name="history" />
         </button>
       </div>
@@ -211,7 +314,9 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
         <div className="feed">
           <div className="start">
             <div className="stack-avatars">
-              {project.agents.slice(0, 5).map((a) => <Avatar key={a.id} name={a.name} seed={a.id} size={36} />)}
+              {project.agents.slice(0, 5).map((a) => (
+                <Avatar key={a.id} name={a.name} seed={a.id} size={36} />
+              ))}
             </div>
             <h2>{t.work.askTitle}</h2>
             <p>{t.work.ready(ceo?.name ?? '', project.agents.length)}</p>
@@ -240,287 +345,67 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
             <div className="feed-inner">
               {items.map((i) => (
                 <FeedItem
-                  key={i.kind === 'tools' ? i.id : i.kind === 'end' || i.kind === 'notice' || i.kind === 'switch' ? `${i.kind}-${i.e.at}` : i.e.id}
+                  key={i.key}
                   item={i}
-                  byId={byId}
-                  nameOf={nameOf}
-                  project={project}
-                  providers={providers}
-                  active={running}
-                  onSave={onSave}
+                  ctx={ctx}
+                  sent={(i.kind === 'approval' || i.kind === 'plan') && answered.has(i.e.id)}
+                  shortcut={i.kind === 'approval' && i.e.id === only}
                 />
               ))}
-              {running && working.length > 0 && (
-                <div className="typing">
-                  <span className="dot live" />
-                  {t.work.working(working.map((a) => a.name).join(', '))}
-                </div>
-              )}
+              {running && <LiveReplies agents={focus ? project.agents.filter((a) => a.id === focus) : project.agents} status={s.status} since={s.since} deltas={liveDeltas} />}
             </div>
           </div>
-          {!viewing && <div className="composer">{composer}</div>}
+          {!viewing && (
+            <div className="composer">
+              {showRaise && <RaiseBudget key={project.budgetUsd} budget={project.budgetUsd} spent={s.total} pending={refused !== null} onRaise={raise} />}
+              {composer}
+            </div>
+          )}
         </>
       )}
 
-      {person && byId.get(person) && (
+      {person && (
         <PersonSheet
-          agent={byId.get(person)!}
-          provider={providers.find((p) => p.id === byId.get(person)!.providerId)?.name ?? ''}
-          manager={nameOf(byId.get(person)!.reportsTo ?? USER)}
-          status={s.status.get(person) ?? 'idle'}
-          cost={s.cost.get(person) ?? 0}
-          focused={focus === person}
-          onFocus={(on) => setFocus(on ? person : null)}
-          onClose={() => setPerson(null)}
+          agent={person}
+          provider={providers.find((p) => p.id === person.providerId)?.name ?? ''}
+          manager={nameOf(person.reportsTo ?? USER)}
+          status={(running && s.status.get(person.id)) || 'idle'}
+          cost={s.cost.get(person.id) ?? 0}
+          focused={focus === person.id}
+          onFocus={(on) => setFocus(on ? person.id : null)}
+          onClose={() => setPanel(null)}
         />
       )}
 
-      {history && (
-        <Modal title={t.work.history} onClose={() => setHistory(null)} width={620}>
-          {history.length ? (
-            <div className="list">
-              {history.map((r) => (
-                <div
-                  key={r.id}
-                  className="list-row click"
-                  onClick={async () => {
-                    const evs = await window.office.readRun(project.id, r.id)
-                    setViewing(r.id === live?.runId ? null : { run: r, events: evs })
-                    setFresh(false)
-                    setHistory(null)
-                  }}
-                >
-                  <div className="spacer ellipsis">
-                    <div className="ellipsis" style={{ fontWeight: 550 }}>{r.goal}</div>
-                    <div className="faint small">{dateTime(r.startedAt)}</div>
-                  </div>
-                  <span className={`tag ${r.state === 'running' ? 'accent' : r.state === 'stopped' ? 'danger' : ''}`}>
-                    {{ running: t.work.running, done: t.work.done, stopped: t.work.stopped, error: t.work.stopped }[r.state]}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">{t.work.noHistory}</p>
-          )}
-        </Modal>
+      {changesOpen && runId && (
+        <ChangesSheet
+          projectId={projectId}
+          runId={runId}
+          running={liveRunning}
+          past={viewing !== null}
+          goal={s.goal}
+          data={changes.data}
+          onRefresh={changes.refresh}
+          onClose={() => setPanel(null)}
+          notify={notify}
+        />
       )}
-    </div>
-  )
-}
 
-function Composer({ value, onChange, onSend, busy, placeholder, hint }: { value: string; onChange(v: string): void; onSend(): void; busy: boolean; placeholder: string; hint: string }) {
-  const t = useT()
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [value])
-  return (
-    <div className="composer-inner">
-      <div className="composer-box">
-        <textarea
-          ref={ref}
-          rows={1}
-          value={value}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              onSend()
-            }
+      {historyOpen && (
+        <HistoryModal
+          projectId={projectId}
+          currentRunId={live?.runId ?? null}
+          onOpen={(r) => void openRun(r)}
+          onRunAgain={runAgain}
+          onDeleted={(id) => {
+            if (viewing?.run.id === id) setViewing(null)
           }}
+          onClose={() => setHistoryOpen(false)}
+          notify={notify}
         />
-        <button className="send" onClick={onSend} disabled={!value.trim() || busy} aria-label={t.work.send}>
-          <Icon name="arrowUp" size={17} />
-        </button>
-      </div>
-      <div className="composer-hint">
-        <span>{t.work.hint}</span>
-        <span className="spacer" />
-        <span>{hint}</span>
-      </div>
+      )}
     </div>
   )
-}
-
-function FeedItem({ item, byId, nameOf, project, providers, active, onSave }: {
-  item: Item
-  byId: Map<string, Agent>
-  nameOf(id: string): string
-  project: Project
-  providers: Provider[]
-  active: boolean
-  onSave(p: Project): Promise<void>
-}) {
-  const t = useT()
-  const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const label = (m: ModelRef) => `${providers.find((p) => p.id === m.providerId)?.name ?? '?'} · ${m.model}`
-
-  if (item.kind === 'notice') {
-    const e = item.e
-    return (
-      <div className="event-line" role="status">
-        <Icon name="clock" size={13} />
-        <span>{t.work.notice(nameOf(e.agentId), t.work.kinds[e.kind], Math.round(e.waitMs / 1000), e.attempt, e.of)}</span>
-      </div>
-    )
-  }
-
-  if (item.kind === 'switch') {
-    const e = item.e
-    return (
-      <div className="event-line" title={e.detail}>
-        <Icon name="swap" size={13} />
-        <span>{t.work.switched(nameOf(e.agentId), label(e.to), t.work.kinds[e.kind])}</span>
-      </div>
-    )
-  }
-
-  if (item.kind === 'blocked') return <BlockedCard e={item.e} resolved={item.resolved || !active} name={nameOf(item.e.agentId)} label={label} project={project} providers={providers} onSave={onSave} />
-
-  if (item.kind === 'end') {
-    const r = t.work.reasons[item.e.reason ?? '']
-    return <div className="divider">{typeof r === 'function' ? r(item.e.usd ?? 0) : (r ?? t.work.done)}</div>
-  }
-
-  if (item.kind === 'tools') {
-    const verb = (n: string) => t.work.tools[n] ?? t.work.usedTool
-    const one = item.list.length === 1 ? item.list[0] : null
-    return (
-      <div className={`activity ${open ? 'open' : ''}`}>
-        <button onClick={() => !one && setOpen(!open)} aria-expanded={one ? undefined : open}>
-          {one ? <Icon name={TOOL_ICON[one.name] ?? 'plug'} size={13} /> : <Icon name="chevron" size={12} className="chev" />}
-          <span className="ellipsis">
-            {nameOf(item.agentId)} {one ? verb(one.name) : `· ${t.work.actions(item.list.length)}`}
-            {one?.summary && <span className="mono"> {one.summary}</span>}
-          </span>
-          {item.list.some((x) => !x.ok) && <span className="tag danger">{t.work.error}</span>}
-        </button>
-        {open && !one && (
-          <ul>
-            {item.list.map((x) => (
-              <li key={x.id} title={x.summary}>
-                <Icon name={TOOL_ICON[x.name] ?? 'plug'} size={13} />
-                <span>{verb(x.name)}</span>
-                <span className="mono ellipsis">{x.summary}</span>
-                {!x.ok && <span className="tag danger">{t.work.error}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    )
-  }
-
-  if (item.kind === 'approval') {
-    const e = item.e
-    const done = item.answer !== undefined || !active
-    return (
-      <div className="card approval">
-        <div className="card-head">
-          <Icon name={e.kind === 'mcp' ? 'plug' : 'terminal'} size={14} />
-          {e.kind === 'mcp' ? t.work.approvalMcp(nameOf(e.agentId)) : t.work.approvalCommand(nameOf(e.agentId))}
-          <span className="spacer" />
-          <span className="faint small" title={project.workspaceDir} style={{ fontWeight: 400 }}>{baseName(project.workspaceDir)}</span>
-        </div>
-        <div className="card-body">
-          <pre>{e.command}</pre>
-          {done ? (
-            item.answer !== undefined && (
-              <div className="row small faint">
-                <Icon name={item.answer ? 'check' : 'x'} size={13} />
-                {item.answer ? t.work.allowed : t.work.denied}
-              </div>
-            )
-          ) : (
-            <div className="row">
-              <button className="btn primary sm" onClick={() => window.office.answer(project.id, e.id, true)}>
-                <Icon name="check" size={13} /> {t.work.allow}
-              </button>
-              <button className="btn sm" onClick={() => window.office.answer(project.id, e.id, false)}>{t.work.deny}</button>
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  const e = item.e
-  if (e.from === USER) {
-    return (
-      <div className="msg owner">
-        <div className="bubble">
-          <div className="to">{t.work.you} → {e.to.map(nameOf).join(', ')}</div>
-          <Markdown text={e.text} />
-        </div>
-      </div>
-    )
-  }
-  if (e.from === SYSTEM) {
-    const warn = e.text.startsWith('E_UNPRICED')
-    return (
-      <div className={`msg system ${warn ? 'warn' : ''}`}>
-        <span className="avatar" style={warn ? { width: 28, height: 28, background: 'var(--accent-soft)', color: 'var(--accent-text)' } : { width: 28, height: 28, background: 'var(--danger-soft)', color: 'var(--danger)' }}>
-          <Icon name="alert" size={14} />
-        </span>
-        <div className="msg-main">
-          <div className="msg-head"><span className="msg-name">{t.work.system}</span><span className="msg-time">{clock(e.at)}</span></div>
-          <div className="msg-body">{systemText(e.text)}</div>
-        </div>
-      </div>
-    )
-  }
-  const a = byId.get(e.from)
-  const report = e.to.includes(USER) && a && !a.reportsTo
-  return (
-    <div className="msg">
-      <Avatar name={a?.name ?? '?'} seed={a?.id} size={28} />
-      <div className="msg-main">
-        <div className="msg-head">
-          <span className="msg-name">{a?.name ?? t.work.formerMember}</span>
-          {a && <span className="msg-meta">{a.title}</span>}
-          <span className="msg-meta">→ {e.to.map(nameOf).join(', ')}</span>
-          <span className="msg-time">{clock(e.at)}</span>
-        </div>
-        {report ? (
-          <div className="card report">
-            <div className="card-head">
-              <Icon name="check" size={14} /> {t.work.finalReport}
-              <span className="spacer" />
-              <button
-                className="btn quiet sm"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(e.text)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 1500)
-                }}
-              >
-                <Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? t.common.copied : t.common.copy}
-              </button>
-              <button className="btn quiet sm" onClick={() => window.office.openWorkspace(project.id)}>
-                <Icon name="folder" size={13} /> {t.work.openFolder}
-              </button>
-            </div>
-            <div className="card-body"><Markdown text={e.text} /></div>
-          </div>
-        ) : (
-          <div className="msg-body"><Markdown text={e.text} /></div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/** System lines look like `Name: message`; the message may be an error code from main. */
-function systemText(text: string) {
-  const i = text.indexOf(': ')
-  return i < 0 ? errText(text) : `${text.slice(0, i)}: ${errText(text.slice(i + 2))}`
 }
 
 function PersonSheet({ agent, provider, manager, status, cost, focused, onFocus, onClose }: {
@@ -539,95 +424,36 @@ function PersonSheet({ agent, provider, manager, status, cost, focused, onFocus,
       <div className="person">
         <Avatar name={agent.name} seed={agent.id} size={64} status={status} />
         <h3>{agent.name}</h3>
-        <div className="muted">{agent.title}{agent.department ? ` · ${agent.department}` : ''}</div>
+        <div className="muted">
+          {agent.title}
+          {agent.department ? ` · ${agent.department}` : ''}
+        </div>
       </div>
       <dl className="facts">
-        <dt>{t.team.manager}</dt><dd>{agent.reportsTo ? manager : t.work.you}</dd>
-        <dt>{t.team.provider}</dt><dd>{provider || '—'}</dd>
-        <dt>{t.team.model}</dt><dd className="mono">{agent.model}</dd>
-        <dt>{t.work.spent}</dt><dd className="num">{usd(cost)}</dd>
-        <dt>{t.work.statusLabel}</dt><dd>{t.work.status[status]}</dd>
+        <dt>{t.team.manager}</dt>
+        <dd>{agent.reportsTo ? manager : t.work.you}</dd>
+        <dt>{t.team.provider}</dt>
+        <dd>{provider || '—'}</dd>
+        <dt>{t.team.model}</dt>
+        <dd className="mono">{agent.model}</dd>
+        <dt>{t.work.spent}</dt>
+        <dd className="num">{usd(cost)}</dd>
+        <dt>{t.work.statusLabel}</dt>
+        <dd>{t.work.status[status]}</dd>
       </dl>
       <div className="stack tight" style={{ marginTop: 24 }}>
-        <button className={`btn ${focused ? '' : 'primary'}`} onClick={() => { onFocus(!focused); onClose() }}>
+        <button
+          className={`btn ${focused ? '' : 'primary'}`}
+          onClick={() => {
+            onFocus(!focused)
+            onClose()
+          }}
+        >
           <Icon name={focused ? 'x' : 'chat'} size={14} />
           {focused ? t.common.close : t.work.messageThem(agent.name)}
         </button>
         <p className="faint small" style={{ textAlign: 'center' }}>{t.work.onlyTheirs}</p>
       </div>
     </Sheet>
-  )
-}
-
-function BlockedCard({ e, resolved, name, label, project, providers, onSave }: {
-  e: Extract<OfficeEvent, { type: 'blocked' }>
-  resolved: boolean
-  name: string
-  label(m: ModelRef): string
-  project: Project
-  providers: Provider[]
-  onSave(p: Project): Promise<void>
-}) {
-  const t = useT()
-  const [picking, setPicking] = useState(false)
-  const [providerId, setProviderId] = useState(e.providerId)
-  const [model, setModel] = useState(e.model)
-  const [busy, setBusy] = useState(false)
-  const advice = e.kind === 'config' ? errText(e.detail) : t.work.advice[e.kind]
-
-  const go = async (to?: ModelRef) => {
-    setBusy(true)
-    try {
-      // The new model sticks: the member keeps it in later tasks too.
-      if (to) await onSave({ ...project, agents: project.agents.map((a) => (a.id === e.agentId ? { ...a, ...to } : a)) })
-      await window.office.retryAgent(project.id, e.agentId, to)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="card blocked" role="alert">
-      <div className="card-head">
-        <Icon name="alert" size={14} />
-        <span className="ellipsis">{t.work.blockedTitle(name, t.work.kinds[e.kind])}</span>
-        <span className="spacer" />
-        <span className="faint small mono" style={{ fontWeight: 400 }}>{label(e)}</span>
-      </div>
-      <div className="card-body stack tight">
-        <p>{advice}</p>
-        {e.kind !== 'config' && e.detail && (
-          <details className="more">
-            <summary><Icon name="chevron" size={12} /> {t.work.details}</summary>
-            <pre>{e.detail}</pre>
-          </details>
-        )}
-        {resolved ? (
-          <div className="row small faint"><Icon name="check" size={13} /> {t.work.resolved}</div>
-        ) : picking ? (
-          <div className="stack tight">
-            <div className="grid2">
-              <select className="select" value={providerId} onChange={(x) => setProviderId(x.target.value)} aria-label={t.team.provider}>
-                {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-              <ModelInput providerId={providerId} value={model} onChange={setModel} />
-            </div>
-            <div className="row">
-              <button className="btn primary sm" disabled={busy || !model.trim()} onClick={() => go({ providerId, model: model.trim() })}>{t.work.switchTo}</button>
-              <button className="btn sm" onClick={() => setPicking(false)}>{t.common.cancel}</button>
-            </div>
-          </div>
-        ) : (
-          <div className="row">
-            <button className="btn primary sm" disabled={busy} onClick={() => go()}>
-              <Icon name="refresh" size={13} /> {t.work.retry}
-            </button>
-            <button className="btn sm" onClick={() => setPicking(true)}>
-              <Icon name="swap" size={13} /> {t.work.otherModel}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
   )
 }
