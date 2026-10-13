@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Balance, Project, Provider, QuotaUse, UsageRow, UsageStats } from '../../shared/types'
-import { errText, getLang, useT } from './i18n'
+import { errText, useT } from './i18n'
 import { Logo } from './Providers'
 import { Empty, Icon, tokens, usd } from './ui'
 
@@ -162,7 +162,11 @@ function DailyChart({ days }: { days: UsageStats['byDay'] }) {
   const [hover, setHover] = useState<number | null>(null)
   const max = Math.max(...days.map((d) => d.usd), 0)
   const top = max > 0 ? niceCeil(max) : 1
-  const label = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString(getLang(), { month: 'short', day: 'numeric' })
+  // Electron ships no Uzbek date data, so month names come from the dictionary.
+  const label = (day: string) => {
+    const [, m, d] = day.split('-').map(Number)
+    return t.usage.day(d, t.usage.months[m - 1])
+  }
   const every = Math.ceil(days.length / 8)
   const h = hover !== null ? days[hover] : null
 
