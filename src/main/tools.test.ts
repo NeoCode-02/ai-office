@@ -255,13 +255,14 @@ function gone(pid: number) {
     return false
   }
 }
-async function waitFor(check: () => boolean, ms = 3000) {
+// Generous: process teardown is slow on a loaded CI runner; a process that never dies still fails.
+async function waitFor(check: () => boolean, ms = 10_000) {
   const end = Date.now() + ms
   while (!check() && Date.now() < end) await new Promise((r) => setTimeout(r, 25))
   return check()
 }
 
-describe('exec', () => {
+describe('exec', { timeout: 20_000 }, () => {
   it('reports the exit code after the output', async () => {
     const root = tmp('ws-')
     expect(await exec('echo hi&& exit 3', root)).toEqual({ content: 'hi\n[exit 3]', isError: false })
