@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { Preset } from '../../main/providers'
-import type { Provider } from '../../shared/types'
+import type { Billing, Provider } from '../../shared/types'
 import { errText, useT } from './i18n'
 import { uid } from './roles'
-import { ConfirmButton, Empty, Field, hue, Icon, Modal } from './ui'
+import { BillingFields, fromRows, PriceTable, toRow, type PriceRow } from './Pricing'
+import { ConfirmButton, Empty, Field, hue, Icon, Modal, usd } from './ui'
 
 const BRAND: Record<string, string> = {
   anthropic: '#c96442',
@@ -81,6 +82,7 @@ export default function Providers({ providers, onChange, notify }: Props) {
                 <div style={{ fontWeight: 600 }}>{p.name}</div>
                 <div className="faint small mono ellipsis">{p.baseURL || 'api.anthropic.com'}</div>
               </div>
+              <span className="tag">{p.billing.mode === 'subscription' && p.billing.fee ? t.providers.subTag(usd(p.billing.fee)) : t.providers.modes[p.billing.mode]}</span>
               {p.hasKey ? <span className="tag ok"><Icon name="check" size={11} /> {t.providers.keySaved}</span> : <span className="tag">{t.providers.noKey}</span>}
               <button className="btn sm" onClick={() => test(p)} disabled={testing === p.id}>
                 {testing === p.id ? t.common.testing : t.common.test}
@@ -96,6 +98,7 @@ export default function Providers({ providers, onChange, notify }: Props) {
       {edit && (
         <ProviderModal
           initial={edit === 'new' ? null : edit}
+          notify={notify}
           onClose={() => setEdit(null)}
           onSaved={() => {
             setEdit(null)
@@ -107,7 +110,7 @@ export default function Providers({ providers, onChange, notify }: Props) {
   )
 }
 
-function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null; onClose(): void; onSaved(): void }) {
+function ProviderModal({ initial, onClose, onSaved, notify }: { initial: Provider | null; onClose(): void; onSaved(): void; notify(t: string): void }) {
   const t = useT()
   const [presets, setPresets] = useState<Preset[]>([])
   const [preset, setPreset] = useState<Preset | null>(null)
@@ -118,10 +121,29 @@ function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null
   const [key, setKey] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [billing, setBilling] = useState<Billing>(initial?.billing ?? { mode: 'payg' })
+  const [rows, setRows] = useState<PriceRow[]>([])
 
   useEffect(() => {
     void window.office.presets().then(setPresets)
   }, [])
+
+  // Price rows: models this provider already has a price for, plus every model the teams use with it.
+  useEffect(() => {
+    if (!initial) return
+    let live = true
+    void (async () => {
+      const used = (await window.office.listProjects()).flatMap((p) =>
+        p.agents.flatMap((a) => [a.providerId === initial.id ? a.model : '', a.backup?.providerId === initial.id ? a.backup.model : ''])
+      )
+      const models = [...new Set([...Object.keys(initial.prices), ...used.map((m) => m.trim()).filter(Boolean)])]
+      const info = await window.office.priceInfo({ kind: initial.kind, baseURL: initial.baseURL, prices: {} }, models)
+      if (live) setRows(models.map((m) => toRow(m, initial.prices[m], info[m]?.price)))
+    })()
+    return () => {
+      live = false
+    }
+  }, [initial])
 
   const pick = (p: Preset | null) => {
     setPreset(p)
@@ -129,6 +151,7 @@ function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null
     setName(p?.name ?? '')
     setBaseURL(p?.baseURL ?? '')
     setKind(p?.kind ?? 'openai')
+    setBilling(p?.baseURL.includes('localhost') ? { mode: 'free' } : { mode: 'payg' })
     setErr('')
   }
 
@@ -136,12 +159,15 @@ function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null
     if (!name.trim()) return setErr(t.providers.errName)
     if (kind === 'openai' && !/^https?:\/\//.test(baseURL)) return setErr(t.providers.errUrl)
     if (!initial && !key.trim() && !baseURL.includes('localhost')) return setErr(t.providers.errKey)
+    let prices
+    try {
+      prices = fromRows(rows)
+    } catch {
+      return setErr(t.providers.errPrice)
+    }
     setBusy(true)
     try {
-      await window.office.saveProvider(
-        { id: initial?.id ?? uid(), name: name.trim(), kind, baseURL: baseURL.trim(), billing: initial?.billing ?? { mode: 'payg' }, prices: initial?.prices ?? {} },
-        key.trim()
-      )
+      await window.office.saveProvider({ id: initial?.id ?? uid(), name: name.trim(), kind, baseURL: baseURL.trim(), billing, prices }, key.trim())
       onSaved()
     } catch (e) {
       setErr(errText(e, t))
@@ -227,6 +253,13 @@ function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null
             >
               <input className="input mono" type="password" autoFocus value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? '••••••••' : 'sk-…'} autoComplete="off" />
             </Field>
+            <BillingFields value={billing} onChange={setBilling} />
+            {billing.mode === 'payg' && (
+              <details className="more" open={rows.some((r) => !r.in && !r.out && !r.builtin)}>
+                <summary><Icon name="chevron" size={12} /> {t.providers.prices}</summary>
+                <PriceTable rows={rows} onChange={setRows} provider={{ kind, baseURL }} notify={notify} />
+              </details>
+            )}
           </>
         )}
         {err && <div className="note danger" role="alert">{err}</div>}

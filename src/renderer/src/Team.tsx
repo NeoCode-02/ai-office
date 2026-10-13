@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Agent, McpServer, Project, Provider, RoleTemplate, ToolName } from '../../shared/types'
+import type { Agent, McpServer, Price, Project, Provider, RoleTemplate, ToolName } from '../../shared/types'
 import { errText, useT } from './i18n'
 import { newAgent, roleByTitle, ROLES, uid } from './roles'
+import { isOpenRouter, num } from './Pricing'
 import { Avatar, ConfirmButton, Empty, Field, Icon, Sheet } from './ui'
 
 const EDITABLE: ToolName[] = ['list_files', 'read_file', 'search_files', 'write_file', 'edit_file', 'run_command', 'web_fetch']
@@ -26,6 +27,27 @@ export function ModelInput({ providerId, value, onChange }: { providerId: string
       <datalist id={listId}>{models.map((m) => <option key={m} value={m} />)}</datalist>
     </>
   )
+}
+
+/** What this member's requests cost, as the stats will count it. */
+function PriceLine({ provider, model }: { provider?: Provider; model: string }) {
+  const t = useT()
+  const id = model.trim()
+  const [price, setPrice] = useState<{ id: string; price?: Price } | null>(null)
+  useEffect(() => {
+    if (!provider || !id) return
+    let live = true
+    void window.office.priceInfo(provider, [id]).then((r) => live && setPrice({ id, price: r[id]?.price }))
+    return () => {
+      live = false
+    }
+  }, [provider, id])
+  if (!provider || !id) return null
+  if (provider.billing.mode === 'subscription') return <small className="faint">{t.team.priceSub}</small>
+  if (provider.billing.mode === 'free') return <small className="faint">{t.team.priceFree}</small>
+  if (isOpenRouter(provider.baseURL)) return <small className="faint">{t.team.priceRouter}</small>
+  if (price?.id !== id) return null
+  return price.price ? <small className="faint num">{t.team.priceLine(num(price.price.in), num(price.price.out))}</small> : <div className="note warn">{t.team.noPrice}</div>
 }
 
 interface Props {
@@ -241,6 +263,25 @@ export default function Team({ project, providers, onSave, notify }: Props) {
                 />
               </Field>
             </div>
+            <PriceLine provider={providers.find((p) => p.id === agent.providerId)} model={agent.model} />
+            <div className="grid2">
+              <Field label={t.team.backup}>
+                <select
+                  className="select"
+                  value={agent.backup?.providerId ?? ''}
+                  onChange={(e) => update({ backup: e.target.value ? { providerId: e.target.value, model: agent.backup?.model ?? '' } : undefined })}
+                >
+                  <option value="">{t.team.noBackup}</option>
+                  {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+              {agent.backup && (
+                <Field label={t.team.model}>
+                  <ModelInput providerId={agent.backup.providerId} value={agent.backup.model} onChange={(m) => update({ backup: { providerId: agent.backup!.providerId, model: m } })} />
+                </Field>
+              )}
+            </div>
+            <small className="faint">{t.team.backupHint}</small>
           </section>
 
           <section className="sheet-group">

@@ -85,8 +85,12 @@ const VENDORS: [RegExp, string][] = [
 ]
 const norm = (s: string) => s.toLowerCase().replace(/\./g, '-')
 
+// Ids that always point at the provider's newest model; the catalog's entry of the same name may be an older one.
+const MOVING = /-latest$|^deepseek-(chat|reasoner)$/i
+
 /** Finds a model's catalog price. Ambiguous or missing matches return undefined, never a guess. */
 export function matchCatalog(list: CatalogModel[], p: Pick<Provider, 'kind' | 'baseURL'>, model: string): Price | undefined {
+  if (MOVING.test(model) && !/openrouter\.ai/.test(p.baseURL)) return undefined
   const plain = list.filter((m) => !m.id.includes(':') && m.pricing)
   let hits: CatalogModel[]
   if (/openrouter\.ai/.test(p.baseURL)) hits = plain.filter((m) => m.id === model)

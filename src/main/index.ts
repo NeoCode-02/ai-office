@@ -87,13 +87,9 @@ const handlers = {
   saveProvider: (p: Omit<Provider, 'hasKey'>, key: string) => store.saveProvider(p, key),
   deleteProvider: (id: string) => store.deleteProvider(id),
   listModels: (id: string) => listModels(store.conn(id)),
-  /** Effective price per model and where it comes from. */
-  priceInfo: (id: string, models: string[]) => {
-    const p = store.provider(id)
-    return Object.fromEntries(
-      models.map((m) => [m, { price: p && priceOf(p, m), source: !p ? 'none' : p.prices[m] ? 'own' : priceOf(p, m) ? 'builtin' : 'none' }])
-    ) as Record<string, { price?: Price; source: 'own' | 'builtin' | 'none' }>
-  },
+  /** Effective price per model (the provider's own, else built-in). */
+  priceInfo: (p: Pick<Provider, 'kind' | 'baseURL' | 'prices'>, models: string[]) =>
+    Object.fromEntries(models.map((m) => [m, { price: priceOf(p, m) }])) as Record<string, { price?: Price }>,
   /** Prices from OpenRouter's public catalog for the models it can match unambiguously. */
   catalogPrices: async (p: Pick<Provider, 'kind' | 'baseURL'>, models: string[]) => {
     const list = await fetchCatalog()

@@ -102,7 +102,8 @@ describe('prices', () => {
     { id: 'anthropic/claude-haiku-5.5', pricing: { prompt: '0.0000001', completion: '0.0000005', input_cache_read: '0.00000001', input_cache_write: '0.000000125', overrides: [{ min_prompt_tokens: 100000, prompt: '0.0000005', completion: '0.0000025', input_cache_read: '0.00000005', input_cache_write: '0.000000625' }] } },
     { id: 'anthropic/claude-haiku-5.5:batch', pricing: { prompt: '0.00000005', completion: '0.00000025' } },
     { id: 'deepseek/deepseek-chat', pricing: { prompt: '0.00000027', completion: '0.0000011' } },
-    { id: 'someone/deepseek-chat', pricing: { prompt: '0.000001', completion: '0.000001' } },
+    { id: 'deepseek/deepseek-v4-pro', pricing: { prompt: '0.00000174', completion: '0.00000348' } },
+    { id: 'someone/deepseek-v4-pro', pricing: { prompt: '0.000001', completion: '0.000001' } },
     { id: 'z-ai/glm-4.6', pricing: { prompt: '0.0000006', completion: '0.0000022', input_cache_read: '0.00000011' } }
   ]
 
@@ -114,8 +115,10 @@ describe('prices', () => {
   })
 
   it('matches by vendor and never guesses', () => {
-    expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://api.deepseek.com' }, 'deepseek-chat')?.in).toBe(0.27)
-    expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://my-proxy.local/v1' }, 'deepseek-chat')).toBeUndefined() // two candidates
+    expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://api.deepseek.com' }, 'deepseek-v4-pro')?.in).toBe(1.74)
+    expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://my-proxy.local/v1' }, 'deepseek-v4-pro')).toBeUndefined() // two candidates
+    // DeepSeek's own deepseek-chat always means its newest model; the catalog's is an old one.
+    expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://api.deepseek.com' }, 'deepseek-chat')).toBeUndefined()
     expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://api.z.ai/api/paas/v4' }, 'glm-4.6')?.cacheRead).toBe(0.11)
     expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://openrouter.ai/api/v1' }, 'z-ai/glm-4.6')?.in).toBe(0.6)
     expect(matchCatalog(list, { kind: 'openai', baseURL: 'https://openrouter.ai/api/v1' }, 'glm-4.6')).toBeUndefined()
