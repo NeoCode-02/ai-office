@@ -28,6 +28,10 @@ Using several AI models together usually means many chat windows and copy-pastin
 - **They talk to each other.** Managers delegate and review, colleagues ask each other questions across departments, reports go up the chain. You only see a calm conversation, not a cockpit.
 - **They do real work.** Read, write and search files, run commands (with your approval), fetch web pages, use skills and MCP tools.
 - **They learn.** Lessons a member saves are given back to them in later work.
+- **You stay in control.** Plan mode (the CEO's plan needs your OK before anything changes), approvals with "always allow", a request limit and a guard against members chatting in circles, a budget per office and daily/monthly spending caps for the whole app.
+- **Undo is one click.** Each task starts from a snapshot of the workspace: see every changed file with its diff, undo one file or all of them, or commit the result to your own Git repository.
+
+## Quick start
 
 ## Quick start
 
@@ -78,6 +82,16 @@ Every request is logged with the tokens the provider reported, and **Usage** sho
 
 ![A member that ran out of credit](docs/limits.png)
 
+## Working with a team
+
+- **Plan mode** (office settings): the CEO proposes a plan with `propose_plan` and, until you approve it, can only read: no files written, no commands, no MCP tools, no delegating. You approve or send feedback.
+- **Approvals**: commands, MCP tools and fetches of this computer or the local network ask first. "Always allow" remembers the command (also with more arguments), the tool or the host for this office; the list is in office settings.
+- **Changes**: the Changes panel lists the files the task added, changed or deleted, with diffs. Undo one file or all; snapshots live in a separate repository, your own `.git` is never touched. Workspaces over 20,000 files or 1 GB are not snapshotted (the task still runs).
+- **Long tasks**: when a member's conversation gets long it is summarized and restarted (compaction), so long work does not hit the model's limit.
+- **Docker sandbox** (optional, office settings): `run_command` runs in a container with only the workspace mounted (its `.git` read-only) and no network unless you allow it.
+- **History**: search past tasks, export one as Markdown, or export a whole office (team, briefing, settings) to share it. Imports never bring permissions or MCP access with them.
+- **Notifications and theme**: desktop notifications when the window is in the background (approval, plan, blocked member, final report, stop), light/dark/system theme, and an update check once a day (Settings → General).
+
 ## Extending
 
 Everything works without extensions. When you need more, go to **Settings → Extensions**:
@@ -93,9 +107,11 @@ Everything works without extensions. When you need more, go to **Settings → Ex
 ## Security
 
 - API keys, MCP environment variables and headers are encrypted with the operating system's keychain (`safeStorage`) and never leave your computer except to the provider you configured.
-- File tools are confined to the office's workspace folder, including through symlinks.
-- Terminal commands and MCP tool calls ask for your approval by default. **Automatic mode is not a sandbox** — only use it for work you trust.
-- Text from imported skills, plugins, fetched web pages and files is given to the models. Only import extensions you trust.
+- File tools are confined to the office's workspace folder: symlinks are resolved (also in folders that don't exist yet), writing inside `.git` is refused, FIFOs and devices are refused, and file tools wait while a command runs in the same workspace so a command can't swap a folder for a symlink mid-check.
+- `web_fetch` resolves each host once and pins the address. Link-local, multicast and reserved addresses (cloud metadata services) are never fetched; this computer (including its own public addresses) and the local network need your approval. Redirects are checked again; responses are capped at 2 MB.
+- Terminal commands, MCP tool calls and local fetches ask for your approval by default. **Automatic mode is not a sandbox**, and neither are MCP servers: they run with your permissions. The optional Docker sandbox only covers `run_command`.
+- The main process only answers its own window, and checks the shape of every argument it receives.
+- Text from imported skills, plugins, offices, fetched web pages and files is given to the models. Only import what you trust.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -106,6 +122,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 | `npm run dev` | Run with hot reload |
 | `npm run lint` · `npm run typecheck` · `npm test` | Checks (CI runs all three plus the build) |
 | `npm run build` | Production build into `out/` |
+| `npm run e2e` | Builds, then drives the app end to end against a fake provider (`e2e/run.mjs`) |
 | `npm run dist` | Installer for the current OS into `dist/` |
 
 Set `AI_OFFICE_DATA=<folder>` to keep app data somewhere else (useful for testing).

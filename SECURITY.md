@@ -10,7 +10,10 @@ Include what an attacker can do, the steps to reproduce, and the version you tes
 
 In scope:
 
-- Reading or writing files outside an office's workspace folder through the built-in tools
+- Reading or writing files outside an office's workspace folder through the built-in tools, or writing inside its `.git` folder
+- `web_fetch` reaching this computer or the local network without approval, or link-local/metadata addresses at all
+- Escaping the Docker sandbox's mounts (e.g. writing the workspace's `.git` from inside it)
+- An imported office file gaining permissions (allow list, MCP access) on import
 - Leaking API keys or MCP secrets
 - Running commands or MCP tools without approval while the office is in "Ask me every time" mode
 - Code execution from the renderer (the UI) into the main process

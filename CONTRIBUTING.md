@@ -16,9 +16,10 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run e2e   # the built app against a fake provider (needs the Electron binary)
 ```
 
-CI runs the same commands on Linux and Windows.
+CI runs the checks on Linux, Windows and macOS, and the end-to-end run on Linux and Windows.
 
 ## Guidelines
 
