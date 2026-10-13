@@ -12,9 +12,9 @@ export interface Role {
 
 /** Suggestions only: title and department are free text, any profession works. */
 export const ROLES: Role[] = [
-  { title: 'CEO', department: 'Rahbariyat', tools: DOCS, instructions: 'Own the goal end to end. Turn it into department-level objectives, assign them to department heads, keep everyone aligned, and deliver one verified final report to the owner.' },
+  { title: 'CEO', department: 'Leadership', tools: DOCS, instructions: 'Own the goal end to end. Turn it into department-level objectives, assign them to department heads, keep everyone aligned, and deliver one verified final report to the owner.' },
   { title: 'CTO', department: 'Engineering', tools: DEV, instructions: 'Own technical direction. Choose the stack and architecture, split engineering work into tasks with acceptance criteria, review code and test results before accepting.' },
-  { title: 'Project Manager', department: 'Rahbariyat', tools: DOCS, instructions: 'Keep a written plan (PLAN.md) with tasks, owners and status. Chase blockers, keep scope tight, make sure every task has a clear definition of done.' },
+  { title: 'Project Manager', department: 'Leadership', tools: DOCS, instructions: 'Keep a written plan (PLAN.md) with tasks, owners and status. Chase blockers, keep scope tight, make sure every task has a clear definition of done.' },
   { title: 'Software Engineer', department: 'Engineering', tools: DEV, instructions: 'Write clean, working code with tests. Run the build and tests before reporting. Report what changed, which files, and the test output.' },
   { title: 'Frontend Engineer', department: 'Engineering', tools: DEV, instructions: 'Build accessible, responsive UI. Match the design spec. Verify it builds and renders without errors.' },
   { title: 'Backend Engineer', department: 'Engineering', tools: DEV, instructions: 'Build APIs and data models. Validate input, handle errors, write tests for the main paths.' },
@@ -47,43 +47,37 @@ export function newAgent(name: string, role: Role, reportsTo: string | null, pro
 const R = (t: string) => roleByTitle(t)!
 
 export interface TeamTemplate {
-  name: string
-  description: string
-  build(providerId: string, model: string): Agent[]
+  id: 'software' | 'security' | 'blank'
+  /** `n` = localized first names, so templates feel native in each language. */
+  build(n: string[], providerId: string, model: string): Agent[]
 }
 
 export const TEMPLATES: TeamTemplate[] = [
   {
-    name: 'Dasturiy mahsulot',
-    description: 'CEO, CTO, 2 dasturchi, QA, dizayner, marketing',
-    build(p, m) {
-      const ceo = newAgent('Aziz', R('CEO'), null, p, m)
-      const cto = newAgent('Bobur', R('CTO'), ceo.id, p, m)
-      const mkt = newAgent('Dilnoza', R('Marketing Manager'), ceo.id, p, m)
+    id: 'software',
+    build(n, p, m) {
+      const ceo = newAgent(n[0], R('CEO'), null, p, m)
+      const cto = newAgent(n[1], R('CTO'), ceo.id, p, m)
+      const mkt = newAgent(n[2], R('Marketing Manager'), ceo.id, p, m)
       return [
         ceo, cto, mkt,
-        newAgent('Sardor', R('Software Engineer'), cto.id, p, m),
-        newAgent('Kamola', R('Frontend Engineer'), cto.id, p, m),
-        newAgent('Jasur', R('QA Engineer'), cto.id, p, m),
-        newAgent('Madina', R('Product Designer'), ceo.id, p, m),
-        newAgent('Nodir', R('Copywriter'), mkt.id, p, m)
+        newAgent(n[3], R('Software Engineer'), cto.id, p, m),
+        newAgent(n[4], R('Frontend Engineer'), cto.id, p, m),
+        newAgent(n[5], R('QA Engineer'), cto.id, p, m),
+        newAgent(n[6], R('Product Designer'), ceo.id, p, m),
+        newAgent(n[7], R('Copywriter'), mkt.id, p, m)
       ]
     }
   },
   {
-    name: 'Xavfsizlik auditi',
-    description: 'Rahbar, xavfsizlik muhandisi, pentester, yurist',
-    build(p, m) {
-      const ceo = newAgent('Aziz', R('CEO'), null, p, m)
-      const head = newAgent('Rustam', { ...R('Security Engineer'), title: 'Head of Security' }, ceo.id, p, m)
-      return [ceo, head, newAgent('Timur', R('Pentester'), head.id, p, m), newAgent('Laylo', R('Security Engineer'), head.id, p, m), newAgent('Zarina', R('Lawyer'), ceo.id, p, m)]
+    id: 'security',
+    build(n, p, m) {
+      const ceo = newAgent(n[0], R('CEO'), null, p, m)
+      const head = newAgent(n[9], { ...R('Security Engineer'), title: 'Head of Security' }, ceo.id, p, m)
+      return [ceo, head, newAgent(n[1], R('Pentester'), head.id, p, m), newAgent(n[4], R('Security Engineer'), head.id, p, m), newAgent(n[8], R('Lawyer'), ceo.id, p, m)]
     }
   },
-  {
-    name: 'Bo‘sh',
-    description: 'Faqat bosh rahbar — jamoani o‘zingiz tuzasiz',
-    build: (p, m) => [newAgent('Aziz', R('CEO'), null, p, m)]
-  }
+  { id: 'blank', build: (n, p, m) => [newAgent(n[0], R('CEO'), null, p, m)] }
 ]
 
 /** Known list prices (USD / 1M tokens). Anything else: user enters it. */

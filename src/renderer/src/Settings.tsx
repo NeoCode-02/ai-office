@@ -1,16 +1,22 @@
 import { useState } from 'react'
 import type { Project, Provider } from '../../shared/types'
-import { ModelInput } from './Team'
+import { useT } from './i18n'
 import { KNOWN_PRICES, TEMPLATES, uid } from './roles'
-import { Field, Icon, Modal } from './ui'
+import { ModelInput } from './Team'
+import { ConfirmButton, Empty, Field, Icon, Modal } from './ui'
 
 export function FolderField({ value, onChange }: { value: string; onChange(v: string): void }) {
+  const t = useT()
+  const pick = async () => {
+    const d = await window.office.pickFolder()
+    if (d) onChange(d)
+  }
   return (
-    <Field label="Ish papkasi (workspace)" hint="Xodimlar faqat shu papka ichida fayl o‘qiydi va yozadi.">
+    <Field label={t.office.folder} hint={t.office.folderHint}>
       <div className="row">
-        <input className="input mono" value={value} onChange={(e) => onChange(e.target.value)} placeholder="D:\loyihalar\mening-ishim" />
-        <button className="btn" type="button" onClick={async () => { const d = await window.office.pickFolder(); if (d) onChange(d) }}>
-          <Icon name="folder" size={15} /> Tanlash
+        <input className="input mono" value={value} onChange={(e) => onChange(e.target.value)} placeholder={t.office.folderPlaceholder} />
+        <button className="btn" type="button" onClick={pick}>
+          <Icon name="folder" size={15} /> {t.common.browse}
         </button>
       </div>
     </Field>
@@ -25,6 +31,7 @@ interface Props {
 }
 
 export default function Settings({ project, onSave, onDelete, notify }: Props) {
+  const t = useT()
   const [p, setP] = useState(project)
   const dirty = JSON.stringify(p) !== JSON.stringify(project)
   const set = <K extends keyof Project>(k: K, v: Project[K]) => setP((x) => ({ ...x, [k]: v }))
@@ -33,62 +40,67 @@ export default function Settings({ project, onSave, onDelete, notify }: Props) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h2>Ofis sozlamalari</h2>
-          <p>Brifing — har bir xodim ishga kirganda o‘qiydigan kompaniya haqidagi to‘liq ma’lumot.</p>
+          <h2>{t.office.title}</h2>
+          <p>{t.office.subtitle}</p>
         </div>
-        <button className="btn primary" disabled={!dirty} onClick={async () => { await onSave(p); notify('Saqlandi') }}>
-          <Icon name="check" /> Saqlash
-        </button>
       </div>
 
       <div className="stack">
-        <div className="card card-pad stack">
-          <div className="grid2">
-            <Field label="Ofis nomi">
-              <input className="input" value={p.name} onChange={(e) => set('name', e.target.value)} />
-            </Field>
-            <Field label="Byudjet (USD, har bir vazifa uchun)" hint="0 — cheklovsiz. Tugaganda ish avtomatik to‘xtaydi.">
-              <input className="input" type="number" min={0} step={0.5} value={p.budgetUsd} onChange={(e) => set('budgetUsd', Math.max(0, Number(e.target.value)))} />
-            </Field>
-          </div>
-          <FolderField value={p.workspaceDir} onChange={(v) => set('workspaceDir', v)} />
-          <Field label="Kompaniya brifingi" hint="Nima qilasiz, mijozlar kim, texnologiyalar, qoidalar, sifat talablari. Qancha aniq bo‘lsa, natija shuncha yaxshi.">
-            <textarea className="textarea" rows={12} value={p.briefing} onChange={(e) => set('briefing', e.target.value)} placeholder={'Masalan:\nBiz — o‘zbek tilidagi ta’lim platformasi. Stack: Next.js + PostgreSQL.\nKod sifati: testlar majburiy, TypeScript strict.\nMijozlar: maktab o‘quvchilari va o‘qituvchilar.'} />
+        <div className="grid2">
+          <Field label={t.office.name}>
+            <input className="input" value={p.name} onChange={(e) => set('name', e.target.value)} />
+          </Field>
+          <Field label={t.office.budget} hint={t.office.budgetHint}>
+            <input className="input num" type="number" min={0} step={0.5} value={p.budgetUsd} onChange={(e) => set('budgetUsd', Math.max(0, Number(e.target.value)))} />
           </Field>
         </div>
+        <FolderField value={p.workspaceDir} onChange={(v) => set('workspaceDir', v)} />
+        <Field label={t.office.briefing} hint={t.office.briefingHint}>
+          <textarea className="textarea" rows={10} value={p.briefing} onChange={(e) => set('briefing', e.target.value)} placeholder={t.office.briefingPlaceholder} />
+        </Field>
+      </div>
 
-        <div className="card card-pad stack">
+      <div className="section">
+        <div className="section-head">
           <div>
-            <div style={{ fontWeight: 650 }}>Terminal buyruqlari</div>
-            <div className="muted small">Xodimlar ish papkasida buyruq (build, test, git…) ishga tushirishidan oldin.</div>
+            <h3>{t.office.commands}</h3>
+            <p>{t.office.commandsHint}</p>
           </div>
-          <div className="seg">
-            <button className={p.approval === 'ask' ? 'on' : ''} onClick={() => set('approval', 'ask')}>Har safar so‘rasin</button>
-            <button className={p.approval === 'auto' ? 'on' : ''} onClick={() => set('approval', 'auto')}>Avtomatik ruxsat</button>
-          </div>
-          {p.approval === 'auto' && (
-            <div className="alert warn">
-              Avtomatik rejimda xodimlar buyruqlarni sizsiz ishga tushiradi. Bu sandbox emas: buyruq butun kompyuterga ta’sir qilishi mumkin. Faqat ishonchli vazifalar uchun yoqing.
-            </div>
-          )}
         </div>
-
-        <div className="card card-pad row">
-          <div>
-            <div style={{ fontWeight: 650 }}>Ofisni o‘chirish</div>
-            <div className="muted small">Jamoa, tarix va eslatmalar o‘chadi. Ish papkasidagi fayllarga tegilmaydi.</div>
+        <div className="stack tight">
+          <div className="seg">
+            <button className={p.approval === 'ask' ? 'on' : ''} onClick={() => set('approval', 'ask')}>{t.office.ask}</button>
+            <button className={p.approval === 'auto' ? 'on' : ''} onClick={() => set('approval', 'auto')}>{t.office.auto}</button>
           </div>
-          <div className="spacer" />
-          <button className="btn danger" onClick={() => confirm(`"${project.name}" o‘chirilsinmi?`) && onDelete()}>
-            <Icon name="trash" size={14} /> O‘chirish
-          </button>
+          {p.approval === 'auto' && <div className="note warn">{t.office.autoWarn}</div>}
         </div>
       </div>
+
+      <div className="section">
+        <div className="list">
+          <div className="list-row">
+            <div className="spacer">
+              <div style={{ fontWeight: 600 }}>{t.office.danger}</div>
+              <div className="muted small">{t.office.dangerHint}</div>
+            </div>
+            <ConfirmButton onConfirm={onDelete}>{t.common.delete}</ConfirmButton>
+          </div>
+        </div>
+      </div>
+
+      {dirty && (
+        <div className="savebar inline" role="status">
+          {t.common.unsaved}
+          <button className="btn quiet sm" onClick={() => setP(project)}>{t.common.discard}</button>
+          <button className="btn primary sm" onClick={async () => { await onSave(p); notify(t.common.saved) }}>{t.common.save}</button>
+        </div>
+      )}
     </div>
   )
 }
 
 export function NewProject({ providers, onClose, onCreate, onProviders }: { providers: Provider[]; onClose(): void; onCreate(p: Project): void; onProviders(): void }) {
+  const t = useT()
   const usable = providers.filter((p) => p.hasKey || p.baseURL.includes('localhost'))
   const [name, setName] = useState('')
   const [tpl, setTpl] = useState(0)
@@ -97,69 +109,68 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
   const [dir, setDir] = useState('')
   const [err, setErr] = useState('')
 
-  const create = () => {
-    if (!name.trim()) return setErr('Ofis nomini kiriting')
-    if (!dir) return setErr('Ish papkasini tanlang')
-    if (!providerId || !model.trim()) return setErr('Standart provayder va modelni tanlang')
-    const [pin, pout] = KNOWN_PRICES[model.trim()] ?? [0, 0]
-    const agents = TEMPLATES[tpl].build(providerId, model.trim()).map((a) => ({ ...a, priceIn: pin, priceOut: pout }))
-    onCreate({ id: uid(), name: name.trim(), workspaceDir: dir, briefing: '', approval: 'ask', budgetUsd: 5, agents })
-  }
-
   if (!usable.length) {
     return (
-      <Modal title="Yangi ofis" onClose={onClose}>
-        <div className="empty" style={{ padding: 24 }}>
-          <div className="empty-icon"><Icon name="key" size={24} /></div>
-          <h3>Avval provayder ulang</h3>
-          <p style={{ margin: '0 0 16px' }}>Xodimlar ishlashi uchun kamida bitta AI provayder kaliti kerak.</p>
-          <button className="btn primary" onClick={onProviders}>Provayder qo‘shish</button>
-        </div>
+      <Modal title={t.office.newTitle} onClose={onClose}>
+        <Empty icon="key" title={t.office.needProvider} body={t.office.needProviderBody}>
+          <button className="btn primary" onClick={onProviders}>{t.providers.add}</button>
+        </Empty>
       </Modal>
     )
   }
 
+  const create = () => {
+    if (!name.trim()) return setErr(t.office.errName)
+    if (!dir.trim()) return setErr(t.office.errFolder)
+    if (!providerId || !model.trim()) return setErr(t.office.errModel)
+    const [pin, pout] = KNOWN_PRICES[model.trim()] ?? [0, 0]
+    const agents = TEMPLATES[tpl].build(t.names, providerId, model.trim()).map((a) => ({ ...a, priceIn: pin, priceOut: pout }))
+    onCreate({ id: uid(), name: name.trim(), workspaceDir: dir.trim(), briefing: '', approval: 'ask', budgetUsd: 5, agents })
+  }
+
   return (
     <Modal
-      title="Yangi ofis"
+      title={t.office.newTitle}
       onClose={onClose}
-      width={620}
+      width={600}
       footer={
         <>
-          <button className="btn" onClick={onClose}>Bekor qilish</button>
-          <button className="btn primary" onClick={create}>Yaratish</button>
+          <button className="btn" onClick={onClose}>{t.common.cancel}</button>
+          <button className="btn primary" onClick={create}>{t.office.create}</button>
         </>
       }
     >
       <div className="stack">
-        <Field label="Ofis nomi">
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Masalan: Startap studiyasi" />
+        <Field label={t.office.name}>
+          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t.office.namePlaceholder} />
         </Field>
-        <Field label="Jamoa shabloni" hint="Keyin istalgan xodimni qo‘shish, o‘chirish, lavozimini va modelini almashtirish mumkin.">
-          <div className="stack" style={{ gap: 6 }}>
-            {TEMPLATES.map((t, i) => (
-              <label key={t.name} className={`check ${tpl === i ? 'on' : ''}`} style={{ padding: '10px 12px' }}>
-                <input type="radio" name="tpl" checked={tpl === i} onChange={() => setTpl(i)} />
-                <div>
-                  <div style={{ fontWeight: 600 }}>{t.name}</div>
-                  <div className="faint small">{t.description}</div>
-                </div>
-              </label>
-            ))}
+        <FolderField value={dir} onChange={setDir} />
+        <Field label={t.office.template} hint={t.office.templateHint}>
+          <div className="stack tight">
+            {TEMPLATES.map((tp, i) => {
+              const [title, desc] = t.templates[tp.id]
+              return (
+                <button key={tp.id} type="button" className={`choice ${tpl === i ? 'on' : ''}`} onClick={() => setTpl(i)}>
+                  <div>
+                    <div className="t">{title}</div>
+                    <div className="d">{desc}</div>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </Field>
         <div className="grid2">
-          <Field label="Standart provayder">
+          <Field label={t.office.defaultProvider}>
             <select className="select" value={providerId} onChange={(e) => setProviderId(e.target.value)}>
               {usable.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
-          <Field label="Standart model" hint="Hammaga beriladi; keyin har biriga alohida tanlaysiz.">
+          <Field label={t.office.defaultModel} hint={t.office.defaultModelHint}>
             <ModelInput providerId={providerId} value={model} onChange={setModel} />
           </Field>
         </div>
-        <FolderField value={dir} onChange={setDir} />
-        {err && <div className="alert">{err}</div>}
+        {err && <div className="note danger" role="alert">{err}</div>}
       </div>
     </Modal>
   )

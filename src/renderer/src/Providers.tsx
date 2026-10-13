@@ -1,31 +1,30 @@
 import { useEffect, useState } from 'react'
-import type { Provider } from '../../shared/types'
 import type { Preset } from '../../main/providers'
+import type { Provider } from '../../shared/types'
+import { errText, useT } from './i18n'
 import { uid } from './roles'
-import { errText, Field, hue, Icon, Modal } from './ui'
+import { ConfirmButton, Empty, Field, hue, Icon, Modal } from './ui'
 
 const BRAND: Record<string, string> = {
-  anthropic: '#d97757',
+  anthropic: '#c96442',
   openai: '#10a37f',
   google: '#4285f4',
   deepseek: '#4d6bfe',
-  kimi: '#1f2937',
+  kimi: '#27272a',
   glm: '#2d5bff',
   openrouter: '#6467f2',
-  xai: '#374151',
+  xai: '#3f3f46',
   mistral: '#fa520f',
   groq: '#f55036',
-  ollama: '#6b7280'
+  ollama: '#52525b'
 }
 
-export function Logo({ name, size }: { name: string; size?: number }) {
+export function Logo({ name }: { name: string }) {
   const key = name.split(/[\s(]/)[0].toLowerCase()
-  const h = hue(key)
-  const bg = BRAND[key] ?? `hsl(${h} 55% 48%)`
   return (
-    <div className="logo" style={{ background: bg, ...(size ? { width: size, height: size } : {}) }}>
-      {name[0]}
-    </div>
+    <span className="logo" style={{ background: BRAND[key] ?? `hsl(${hue(key)} 35% 42%)` }}>
+      {name[0]?.toUpperCase()}
+    </span>
   )
 }
 
@@ -36,16 +35,16 @@ interface Props {
 }
 
 export default function Providers({ providers, onChange, notify }: Props) {
+  const t = useT()
   const [edit, setEdit] = useState<Provider | 'new' | null>(null)
   const [testing, setTesting] = useState<string | null>(null)
 
   const test = async (p: Provider) => {
     setTesting(p.id)
     try {
-      const models = await window.office.listModels(p.id)
-      notify(`${p.name}: ulanish ishlayapti, ${models.length} ta model`)
+      notify(t.providers.ok(p.name, (await window.office.listModels(p.id)).length))
     } catch (e) {
-      notify(`${p.name}: ${errText(e)}`)
+      notify(`${p.name}: ${errText(e, t)}`)
     } finally {
       setTesting(null)
     }
@@ -55,50 +54,40 @@ export default function Providers({ providers, onChange, notify }: Props) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h2>AI provayderlar</h2>
-          <p>Kalitlar faqat shu kompyuterda, Windows shifrlashi (DPAPI) bilan saqlanadi.</p>
+          <h2>{t.prefs.providers}</h2>
+          <p>{t.providers.subtitle}</p>
         </div>
-        <button className="btn primary" onClick={() => setEdit('new')}>
-          <Icon name="plus" /> Provayder qo‘shish
-        </button>
+        {providers.length > 0 && (
+          <button className="btn primary" onClick={() => setEdit('new')}>
+            <Icon name="plus" size={14} /> {t.providers.add}
+          </button>
+        )}
       </div>
 
       {providers.length === 0 ? (
-        <div className="card empty">
-          <div className="empty-icon">
-            <Icon name="key" size={24} />
-          </div>
-          <h3>Hali provayder yo‘q</h3>
-          <p style={{ maxWidth: 420, margin: '0 0 16px' }}>Kamida bitta AI provayderning API kalitini qo‘shing. Bitta provayder modelini istalgancha xodimga berish mumkin.</p>
-          <button className="btn primary" onClick={() => setEdit('new')}>
-            <Icon name="plus" /> Provayder qo‘shish
-          </button>
+        <div className="list">
+          <Empty icon="key" title={t.providers.none} body={t.providers.noneBody}>
+            <button className="btn primary" onClick={() => setEdit('new')}>
+              <Icon name="plus" size={14} /> {t.providers.add}
+            </button>
+          </Empty>
         </div>
       ) : (
-        <div className="prov-grid">
+        <div className="list">
           {providers.map((p) => (
-            <div key={p.id} className="card prov">
-              <div className="row">
-                <Logo name={p.name} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 650 }}>{p.name}</div>
-                  <div className="faint small mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.baseURL || 'api.anthropic.com'}
-                  </div>
-                </div>
+            <div key={p.id} className="list-row">
+              <Logo name={p.name} />
+              <div className="spacer ellipsis">
+                <div style={{ fontWeight: 600 }}>{p.name}</div>
+                <div className="faint small mono ellipsis">{p.baseURL || 'api.anthropic.com'}</div>
               </div>
-              <div className="row">
-                {p.hasKey ? <span className="badge ok"><Icon name="check" size={12} /> Kalit saqlangan</span> : <span className="badge warn">Kalit yo‘q</span>}
-                <span className="badge">{p.kind === 'anthropic' ? 'Anthropic API' : 'OpenAI-compatible'}</span>
-              </div>
-              <div className="row">
-                <button className="btn sm" onClick={() => test(p)} disabled={testing === p.id}>
-                  <Icon name="zap" size={14} /> {testing === p.id ? 'Tekshirilmoqda…' : 'Tekshirish'}
-                </button>
-                <button className="btn sm ghost" onClick={() => setEdit(p)}>
-                  <Icon name="edit" size={14} /> Tahrirlash
-                </button>
-              </div>
+              {p.hasKey ? <span className="tag ok"><Icon name="check" size={11} /> {t.providers.keySaved}</span> : <span className="tag">{t.providers.noKey}</span>}
+              <button className="btn sm" onClick={() => test(p)} disabled={testing === p.id}>
+                {testing === p.id ? t.common.testing : t.common.test}
+              </button>
+              <button className="btn quiet icon sm" onClick={() => setEdit(p)} aria-label={`${t.common.edit} ${p.name}`} title={t.common.edit}>
+                <Icon name="edit" size={14} />
+              </button>
             </div>
           ))}
         </div>
@@ -119,8 +108,10 @@ export default function Providers({ providers, onChange, notify }: Props) {
 }
 
 function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null; onClose(): void; onSaved(): void }) {
+  const t = useT()
   const [presets, setPresets] = useState<Preset[]>([])
   const [preset, setPreset] = useState<Preset | null>(null)
+  const [custom, setCustom] = useState(false)
   const [name, setName] = useState(initial?.name ?? '')
   const [baseURL, setBaseURL] = useState(initial?.baseURL ?? '')
   const [kind, setKind] = useState(initial?.kind ?? 'openai')
@@ -134,105 +125,108 @@ function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null
 
   const pick = (p: Preset | null) => {
     setPreset(p)
-    setName(p?.name ?? 'Custom')
+    setCustom(!p)
+    setName(p?.name ?? '')
     setBaseURL(p?.baseURL ?? '')
     setKind(p?.kind ?? 'openai')
+    setErr('')
   }
 
   const save = async () => {
-    if (!name.trim()) return setErr('Nom kiriting')
-    if (kind === 'openai' && !/^https?:\/\//.test(baseURL)) return setErr('Base URL http(s):// bilan boshlanishi kerak')
-    if (!initial && !key.trim() && !baseURL.includes('localhost')) return setErr('API kalitni kiriting')
+    if (!name.trim()) return setErr(t.providers.errName)
+    if (kind === 'openai' && !/^https?:\/\//.test(baseURL)) return setErr(t.providers.errUrl)
+    if (!initial && !key.trim() && !baseURL.includes('localhost')) return setErr(t.providers.errKey)
     setBusy(true)
-    const id = initial?.id ?? uid()
     try {
-      await window.office.saveProvider({ id, name: name.trim(), kind, baseURL: baseURL.trim() }, key.trim())
+      await window.office.saveProvider({ id: initial?.id ?? uid(), name: name.trim(), kind, baseURL: baseURL.trim() }, key.trim())
       onSaved()
     } catch (e) {
-      setErr(errText(e))
+      setErr(errText(e, t))
       setBusy(false)
     }
   }
 
-  const remove = async () => {
-    if (!initial || !confirm(`${initial.name} o‘chirilsinmi? Undan foydalanayotgan xodimlar ishlamay qoladi.`)) return
-    await window.office.deleteProvider(initial.id)
-    onSaved()
-  }
-
-  const showForm = initial || preset || name
+  const showForm = Boolean(initial || preset || custom)
 
   return (
     <Modal
-      title={initial ? `${initial.name}` : 'Provayder qo‘shish'}
+      title={initial ? initial.name : t.providers.add}
       onClose={onClose}
-      width={620}
+      width={600}
       footer={
         <>
           {initial && (
-            <button className="btn danger ghost" onClick={remove} style={{ marginRight: 'auto' }}>
-              <Icon name="trash" size={14} /> O‘chirish
-            </button>
+            <span className="spacer">
+              <ConfirmButton
+                onConfirm={async () => {
+                  await window.office.deleteProvider(initial.id)
+                  onSaved()
+                }}
+              >
+                {t.common.delete}
+              </ConfirmButton>
+            </span>
           )}
-          <button className="btn" onClick={onClose}>Bekor qilish</button>
+          <button className="btn" onClick={onClose}>{t.common.cancel}</button>
           <button className="btn primary" onClick={save} disabled={busy || !showForm}>
-            {busy ? 'Saqlanmoqda…' : 'Saqlash'}
+            {busy ? t.common.saving : t.common.save}
           </button>
         </>
       }
     >
       <div className="stack">
         {!initial && (
-          <div className="preset-grid">
+          <div className="presets">
             {presets.map((p) => (
               <button key={p.name} className={`preset ${preset?.name === p.name ? 'on' : ''}`} onClick={() => pick(p)}>
                 <Logo name={p.name} />
-                {p.name}
+                <span className="ellipsis">{p.name}</span>
               </button>
             ))}
-            <button className={`preset ${showForm && !preset ? 'on' : ''}`} onClick={() => pick(null)}>
-              <div className="logo" style={{ background: 'var(--text-3)' }}>
-                <Icon name="plus" size={14} />
-              </div>
-              Boshqa (custom)
+            <button className={`preset ${custom ? 'on' : ''}`} onClick={() => pick(null)}>
+              <span className="logo" style={{ background: 'var(--sunken)', color: 'var(--text-2)' }}>
+                <Icon name="plus" size={13} />
+              </span>
+              {t.providers.custom}
             </button>
           </div>
         )}
 
         {showForm && (
           <>
-            <div className="grid2">
-              <Field label="Nomi">
-                <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            {(custom || initial) && (
+              <div className="grid2">
+                <Field label={t.providers.name}>
+                  <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+                </Field>
+                <Field label={t.providers.apiType}>
+                  <select className="select" value={kind} onChange={(e) => setKind(e.target.value as Provider['kind'])}>
+                    <option value="openai">OpenAI-compatible</option>
+                    <option value="anthropic">Anthropic</option>
+                  </select>
+                </Field>
+              </div>
+            )}
+            {(custom || initial) && (
+              <Field label={t.providers.baseUrl} hint={kind === 'anthropic' ? t.providers.baseUrlHint : undefined}>
+                <input className="input mono" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://…/v1" />
               </Field>
-              <Field label="API turi">
-                <select className="select" value={kind} onChange={(e) => setKind(e.target.value as Provider['kind'])}>
-                  <option value="openai">OpenAI-compatible</option>
-                  <option value="anthropic">Anthropic</option>
-                </select>
-              </Field>
-            </div>
-            <Field label="Base URL" hint={kind === 'anthropic' ? 'Bo‘sh qoldirsangiz — rasmiy Anthropic API' : undefined}>
-              <input className="input mono" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://…/v1" />
-            </Field>
+            )}
             <Field
-              label="API kalit"
+              label={t.providers.key}
               hint={
-                <>
-                  {initial?.hasKey ? 'Saqlangan kalit bor — almashtirish uchun yangisini kiriting. ' : ''}
-                  {preset?.keyUrl && (
-                    <a href={preset.keyUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)' }}>
-                      Kalitni qayerdan olish <Icon name="external" size={11} />
-                    </a>
-                  )}
-                </>
+                initial?.hasKey ? t.providers.keyKeep : preset?.keyUrl ? (
+                  <a href={preset.keyUrl} target="_blank" rel="noreferrer">
+                    {t.providers.getKey} <Icon name="external" size={11} />
+                  </a>
+                ) : undefined
               }
             >
-              <input className="input mono" type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? '••••••••' : 'sk-…'} autoComplete="off" />
+              <input className="input mono" type="password" autoFocus value={key} onChange={(e) => setKey(e.target.value)} placeholder={initial?.hasKey ? '••••••••' : 'sk-…'} autoComplete="off" />
             </Field>
           </>
         )}
-        {err && <div className="alert">{err}</div>}
+        {err && <div className="note danger" role="alert">{err}</div>}
       </div>
     </Modal>
   )

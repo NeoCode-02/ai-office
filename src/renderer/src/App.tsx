@@ -1,36 +1,33 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { OfficeEvent, Project, Provider } from '../../shared/types'
-import OfficeView from './OfficeView'
-import Providers from './Providers'
+import { useT } from './i18n'
+import Prefs, { type PrefsTab } from './Prefs'
 import Settings, { NewProject } from './Settings'
 import Team from './Team'
-import { Icon, type IconName } from './ui'
+import { Icon, Mark, type IconName } from './ui'
+import Work from './Work'
 
 export interface Live {
   runId: string
   events: OfficeEvent[]
 }
-type Tab = 'office' | 'team' | 'settings'
-const TABS: [Tab, string, IconName][] = [
-  ['office', 'Ofis', 'chat'],
-  ['team', 'Jamoa', 'users'],
-  ['settings', 'Sozlamalar', 'settings']
-]
+type Tab = 'work' | 'team' | 'settings'
 
 export default function App() {
+  const t = useT()
   const [providers, setProviders] = useState<Provider[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [sel, setSel] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('office')
-  const [page, setPage] = useState<'project' | 'providers'>('project')
+  const [tab, setTab] = useState<Tab>('work')
+  const [prefs, setPrefs] = useState<PrefsTab | null>(null)
   const [live, setLive] = useState<Record<string, Live>>({})
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState('')
   const [ready, setReady] = useState(false)
 
-  const notify = useCallback((t: string) => {
-    setToast(t)
-    setTimeout(() => setToast((x) => (x === t ? '' : x)), 3500)
+  const notify = useCallback((msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast((x) => (x === msg ? '' : x)), 3500)
   }, [])
 
   const reload = useCallback(async () => {
@@ -57,8 +54,7 @@ export default function App() {
     return window.office.onEvent((projectId, runId, ev) =>
       setLive((l) => {
         const cur = l[projectId]
-        const events = cur?.runId === runId ? [...cur.events, ev] : [ev]
-        return { ...l, [projectId]: { runId, events } }
+        return { ...l, [projectId]: { runId, events: cur?.runId === runId ? [...cur.events, ev] : [ev] } }
       })
     )
   }, [reload])
@@ -71,77 +67,78 @@ export default function App() {
   }
 
   const running = (id: string) => {
-    const evs = live[id]?.events ?? []
-    const last = evs.findLast((e) => e.type === 'run')
+    const last = live[id]?.events.findLast((e) => e.type === 'run')
     return last?.type === 'run' && last.state === 'running'
   }
 
+  const tabs: [Tab, string, IconName][] = [
+    ['work', t.nav.work, 'chat'],
+    ['team', t.nav.team, 'users'],
+    ['settings', t.nav.officeSettings, 'sliders']
+  ]
+
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="titlebar-drag brand">
-          <div className="brand-mark">
-            <Icon name="building" size={15} />
-          </div>
+      <nav className="rail" aria-label={t.nav.offices}>
+        <div className="brand drag">
+          <Mark />
           AI Office
         </div>
-        <div className="side-section">
-          Ofislar
-          <button className="btn ghost icon sm" onClick={() => setCreating(true)} aria-label="Yangi ofis" title="Yangi ofis">
+        <div className="rail-head">
+          {t.nav.offices}
+          <button className="btn quiet icon sm" onClick={() => setCreating(true)} aria-label={t.nav.newOffice} title={t.nav.newOffice}>
             <Icon name="plus" />
           </button>
         </div>
-        <div className="side-list">
+        <div className="rail-list">
           {projects.map((p) => (
             <button
               key={p.id}
-              className={`side-item ${page === 'project' && sel === p.id ? 'active' : ''}`}
+              className={`rail-item ${!prefs && sel === p.id ? 'on' : ''}`}
               onClick={() => {
                 setSel(p.id)
-                setPage('project')
+                setPrefs(null)
               }}
             >
-              <Icon name="building" />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-              <span className="meta">{running(p.id) ? <span className="dot working" /> : p.agents.length}</span>
+              <span className="label">{p.name}</span>
+              {running(p.id) ? <span className="dot live" /> : <span className="meta">{p.agents.length}</span>}
             </button>
           ))}
-          {ready && !projects.length && <p className="faint small" style={{ padding: '4px 10px' }}>Hali ofis yo‘q</p>}
+          {ready && !projects.length && <p className="rail-empty">{t.nav.noOffices}</p>}
         </div>
-        <div className="side-foot">
-          <button className={`side-item ${page === 'providers' ? 'active' : ''}`} onClick={() => setPage('providers')}>
-            <Icon name="key" />
-            AI provayderlar
-            <span className="meta">{providers.length}</span>
+        <div className="rail-foot">
+          <button className={`rail-item ${prefs ? 'on' : ''}`} onClick={() => setPrefs('providers')}>
+            <Icon name="sliders" />
+            <span className="label">{t.nav.settings}</span>
           </button>
         </div>
-      </aside>
+      </nav>
 
       <main className="main">
-        {page === 'providers' ? (
+        {prefs ? (
           <>
-            <div className="titlebar-drag topbar">
-              <h1>AI provayderlar</h1>
-            </div>
-            <div className="content">
-              <Providers providers={providers} onChange={reload} notify={notify} />
+            <header className="topbar drag">
+              <h1>{t.prefs.title}</h1>
+            </header>
+            <div className="content fixed">
+              <Prefs tab={prefs} onTab={setPrefs} providers={providers} onProviders={reload} notify={notify} />
             </div>
           </>
         ) : project ? (
           <>
-            <div className="titlebar-drag topbar">
+            <header className="topbar drag">
               <h1>{project.name}</h1>
-              <nav className="tabs">
-                {TABS.map(([id, label, icon]) => (
-                  <button key={id} className={`tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
-                    <Icon name={icon} size={15} />
+              <div className="tabs" role="tablist">
+                {tabs.map(([id, label, icon]) => (
+                  <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>
+                    <Icon name={icon} size={14} />
                     {label}
                   </button>
                 ))}
-              </nav>
-            </div>
-            <div className="content" style={tab === 'settings' ? undefined : { overflow: 'hidden' }}>
-              {tab === 'office' && <OfficeView key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} />}
+              </div>
+            </header>
+            <div className={`content ${tab === 'settings' ? '' : 'fixed'}`}>
+              {tab === 'work' && <Work key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} />}
               {tab === 'team' && <Team key={project.id} project={project} providers={providers} onSave={saveProject} notify={notify} />}
               {tab === 'settings' && (
                 <Settings
@@ -153,7 +150,7 @@ export default function App() {
                     await window.office.deleteProject(project.id)
                     const pj = await reload()
                     setSel(pj[0]?.id ?? null)
-                    setTab('office')
+                    setTab('work')
                   }}
                 />
               )}
@@ -161,8 +158,8 @@ export default function App() {
           </>
         ) : (
           <>
-            <div className="titlebar-drag topbar" />
-            <div className="content">{ready && <Welcome providers={providers} onProviders={() => setPage('providers')} onCreate={() => setCreating(true)} />}</div>
+            <header className="topbar drag" />
+            <div className="content">{ready && <Welcome providers={providers} onProviders={() => setPrefs('providers')} onCreate={() => setCreating(true)} />}</div>
           </>
         )}
       </main>
@@ -173,12 +170,12 @@ export default function App() {
           onClose={() => setCreating(false)}
           onProviders={() => {
             setCreating(false)
-            setPage('providers')
+            setPrefs('providers')
           }}
           onCreate={async (p) => {
             await saveProject(p)
             setSel(p.id)
-            setPage('project')
+            setPrefs(null)
             setTab('team')
             setCreating(false)
           }}
@@ -190,40 +187,33 @@ export default function App() {
 }
 
 function Welcome({ providers, onProviders, onCreate }: { providers: Provider[]; onProviders(): void; onCreate(): void }) {
-  const hasKey = providers.some((p) => p.hasKey)
+  const t = useT()
+  const hasKey = providers.some((p) => p.hasKey || p.baseURL.includes('localhost'))
+  const steps: [string, string, boolean, (() => void) | null, string][] = [
+    [t.welcome.step1, t.welcome.step1Body, hasKey, onProviders, t.welcome.connect],
+    [t.welcome.step2, t.welcome.step2Body, false, hasKey ? onCreate : null, t.welcome.create],
+    [t.welcome.step3, t.welcome.step3Body, false, null, '']
+  ]
   return (
-    <div className="page">
-      <div className="empty" style={{ paddingBottom: 0 }}>
-        <div className="empty-icon">
-          <Icon name="building" size={26} />
-        </div>
-        <h3 style={{ fontSize: 26, letterSpacing: '-0.02em' }}>AI xodimlaringiz uchun ofis</h3>
-        <p style={{ maxWidth: 560, margin: 0 }}>
-          Turli AI modellarni bitta jamoaga yig‘ing: har biriga lavozim bering, bo‘limlarga ajrating, boshliqlar tayinlang. Siz faqat maqsadni aytasiz — ular o‘zaro gaplashib, ishni bo‘lib, bajarib, tekshirib, sizga hisobot beradi.
-        </p>
-      </div>
-      <div className="steps">
-        <div className={`card step ${hasKey ? 'done' : ''}`}>
-          <div className="step-n">{hasKey ? <Icon name="check" size={14} /> : 1}</div>
-          <h4>Provayder ulang</h4>
-          <p>Claude, GPT, Gemini, DeepSeek, Kimi, GLM yoki boshqa — API kalitingizni kiriting.</p>
-          <button className={`btn sm ${hasKey ? '' : 'primary'}`} onClick={onProviders}>
-            <Icon name="key" size={14} /> Provayderlar
-          </button>
-        </div>
-        <div className="card step">
-          <div className="step-n">2</div>
-          <h4>Ofis va jamoa tuzing</h4>
-          <p>Tayyor shablondan boshlang yoki noldan: CEO, bo‘lim boshliqlari, xodimlar.</p>
-          <button className={`btn sm ${hasKey ? 'primary' : ''}`} onClick={onCreate} disabled={!hasKey}>
-            <Icon name="plus" size={14} /> Yangi ofis
-          </button>
-        </div>
-        <div className="card step">
-          <div className="step-n">3</div>
-          <h4>Maqsad bering</h4>
-          <p>Bosh rahbarga vazifani yozing va jarayonni jonli kuzating. Yakunda hisobot olasiz.</p>
-        </div>
+    <div className="welcome">
+      <Mark size={40} />
+      <h2>{t.welcome.title}</h2>
+      <p>{t.welcome.body}</p>
+      <div className="list steps">
+        {steps.map(([title, body, done, action, label], i) => (
+          <div key={title} className={`step ${done ? 'done' : ''}`}>
+            <span className="step-n">{done ? <Icon name="check" size={13} /> : i + 1}</span>
+            <div>
+              <h4>{title}</h4>
+              <p>{body}</p>
+            </div>
+            {action && !done && (
+              <button className={`btn ${i === (hasKey ? 1 : 0) ? 'primary' : ''}`} onClick={action}>
+                {label}
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )
