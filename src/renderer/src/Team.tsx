@@ -6,6 +6,10 @@ import { Avatar, Dept, errText, Field, Icon } from './ui'
 const TOOL_LABELS: Record<ToolName, string> = {
   list_files: 'Fayllar ro‘yxati',
   read_file: 'Fayl o‘qish',
+  search_files: 'Fayllarda qidirish',
+  web_fetch: 'Veb sahifa yuklash',
+  use_skill: 'Skill',
+  read_skill_file: 'Skill fayli',
   write_file: 'Fayl yozish',
   edit_file: 'Fayl tahrirlash',
   run_command: 'Terminal buyruqlari',
