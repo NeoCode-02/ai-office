@@ -1,4 +1,4 @@
-import type { Agent, ToolName } from '../../shared/types'
+import type { Agent, ModelRef, RoleTemplate, ToolName } from '../../shared/types'
 
 const DEV: ToolName[] = ['list_files', 'read_file', 'write_file', 'edit_file', 'run_command']
 const DOCS: ToolName[] = ['list_files', 'read_file', 'write_file', 'edit_file']
@@ -21,6 +21,7 @@ export const ROLES: Role[] = [
   { title: 'Mobile Developer', department: 'Engineering', tools: DEV, instructions: 'Build the mobile app. Keep it simple and native-feeling, verify it compiles.' },
   { title: 'Data Engineer', department: 'Data', tools: DEV, instructions: 'Design data pipelines and schemas. Make transformations reproducible and document data sources.' },
   { title: 'QA Engineer', department: 'Engineering', tools: DEV, instructions: 'Try to break things. Write and run tests, report reproducible bugs with exact steps and output.' },
+  { title: 'Reviewer', department: 'Engineering', tools: DEV, instructions: 'Review every change before it is accepted: read the changed files, run the build and tests, and try the edge cases. Report each problem with file, exact steps and output, or approve explicitly.' },
   { title: 'DevOps Engineer', department: 'Engineering', tools: DEV, instructions: 'Own builds, CI, containers and deployment scripts. Never run destructive commands without saying why.' },
   { title: 'Security Engineer', department: 'Security', tools: DEV, instructions: 'Review code and configs for vulnerabilities (injection, auth, secrets, dependencies). Report findings with file, impact and fix.' },
   { title: 'Pentester', department: 'Security', tools: DEV, instructions: 'Test only the project in the workspace. Find exploitable weaknesses, prove them safely, and write a report with severity and remediation.' },
@@ -36,7 +37,43 @@ export const ROLES: Role[] = [
   { title: 'Support Specialist', department: 'Support', tools: DOCS, instructions: 'Write help-center articles and canned replies that solve real user problems.' }
 ]
 
-export const roleByTitle = (t: string) => ROLES.find((r) => r.title.toLowerCase() === t.trim().toLowerCase())
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+export const roleByTitle = (t: string) => ROLES.find((r) => same(r.title, t))
+
+/** Empty or some role's stock text: replacing it loses nothing the owner wrote. */
+export function isStockInstructions(text: string, pluginRoles: Pick<RoleTemplate, 'instructions'>[] = []): boolean {
+  const s = text.trim()
+  return !s || [...ROLES, ...pluginRoles].some((r) => r.instructions.trim() === s)
+}
+
+const stockDepartment = (d: string) => !d.trim() || ROLES.some((r) => same(r.department, d))
+
+/**
+ * What changes when the role field is set to `title`. A known role brings its instructions and tools
+ * only when the current instructions are stock; its department replaces a stock department name but
+ * never one the owner typed.
+ */
+export function changeRole(agent: Agent, title: string, pluginRoles: RoleTemplate[] = []): Partial<Agent> {
+  const r = roleByTitle(title)
+  const role = r ?? pluginRoles.find((x) => same(x.title, title))
+  if (!role) return { title }
+  const patch: Partial<Agent> = { title: role.title }
+  if (r && stockDepartment(agent.department)) patch.department = r.department
+  if (isStockInstructions(agent.instructions, pluginRoles)) {
+    patch.instructions = role.instructions
+    if (r) patch.tools = [...r.tools]
+  }
+  return patch
+}
+
+/** The current role's defaults, when the member's instructions differ from them; null otherwise. */
+export function roleDefaults(agent: Agent, pluginRoles: RoleTemplate[] = []): Partial<Agent> | null {
+  const r = roleByTitle(agent.title)
+  const role = r ?? pluginRoles.find((x) => same(x.title, agent.title))
+  if (!role || agent.instructions.trim() === role.instructions.trim()) return null
+  return r ? { instructions: r.instructions, tools: [...r.tools] } : { instructions: role.instructions }
+}
 
 export const uid = () => crypto.randomUUID().slice(0, 8)
 
@@ -44,10 +81,17 @@ export function newAgent(name: string, role: Role, reportsTo: string | null, pro
   return { id: uid(), name, title: role.title, department: role.department, reportsTo, instructions: role.instructions, providerId, model, tools: [...role.tools] }
 }
 
+/** Gives everyone except the top executive another model (usually a cheaper one). */
+export function withWorkerModel(agents: Agent[], worker?: ModelRef | null): Agent[] {
+  const model = worker?.model.trim()
+  if (!worker?.providerId || !model) return agents
+  return agents.map((a) => (a.reportsTo ? { ...a, providerId: worker.providerId, model } : a))
+}
+
 const R = (t: string) => roleByTitle(t)!
 
 export interface TeamTemplate {
-  id: 'software' | 'security' | 'blank'
+  id: 'software' | 'lite' | 'security' | 'blank'
   /** `n` = localized first names, so templates feel native in each language. */
   build(n: string[], providerId: string, model: string): Agent[]
 }
@@ -67,6 +111,13 @@ export const TEMPLATES: TeamTemplate[] = [
         newAgent(n[6], R('Product Designer'), ceo.id, p, m),
         newAgent(n[7], R('Copywriter'), mkt.id, p, m)
       ]
+    }
+  },
+  {
+    id: 'lite',
+    build(n, p, m) {
+      const ceo = newAgent(n[0], R('CEO'), null, p, m)
+      return [ceo, newAgent(n[1], R('Software Engineer'), ceo.id, p, m), newAgent(n[2], R('Reviewer'), ceo.id, p, m)]
     }
   },
   {

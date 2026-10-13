@@ -1,9 +1,11 @@
-import { useState } from 'react'
-import type { Project, Provider } from '../../shared/types'
-import { useT } from './i18n'
-import { TEMPLATES, uid } from './roles'
+import { useEffect, useId, useState, type ReactNode } from 'react'
+import { DEFAULT_SANDBOX, type ModelRef, type Project, type Provider } from '../../shared/types'
+import { errText, useT } from './i18n'
+import { allowEntry, isDirty, latestProject, saveForm, toForm, type AllowKind, type OfficeForm } from './officeForm'
+import { sameJson } from './orgchart'
+import { TEMPLATES, uid, withWorkerModel, type TeamTemplate } from './roles'
 import { ModelInput } from './Team'
-import { ConfirmButton, Empty, Field, Icon, Modal } from './ui'
+import { baseName, ConfirmButton, Empty, Field, Icon, Modal, Switch, type IconName } from './ui'
 
 export function FolderField({ value, onChange }: { value: string; onChange(v: string): void }) {
   const t = useT()
@@ -23,18 +25,112 @@ export function FolderField({ value, onChange }: { value: string; onChange(v: st
   )
 }
 
+/** A settings line: title and hint on the left, the control on the right. The whole line labels the control. */
+function Row({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <label className="list-row org-row">
+      <span className="spacer">
+        <span className="org-row-title">{label}</span>
+        {hint && <span className="org-row-hint muted small">{hint}</span>}
+      </span>
+      {children}
+    </label>
+  )
+}
+
+/** Segmented choice with pressed state for assistive tech. */
+function Seg<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string][]; onChange(v: T): void }) {
+  return (
+    <div className="seg" role="group" aria-label={label}>
+      {options.map(([v, text]) => (
+        <button key={v} type="button" className={value === v ? 'on' : ''} aria-pressed={value === v} onClick={() => onChange(v)}>
+          {text}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const ALLOW_ICONS: Record<AllowKind, IconName> = { command: 'terminal', mcp: 'plug', fetch: 'globe' }
+
 interface Props {
   project: Project
   onSave(p: Project): Promise<void>
-  onDelete(): void
+  onDelete(): void | Promise<void>
   notify(t: string): void
 }
 
 export default function Settings({ project, onSave, onDelete, notify }: Props) {
   const t = useT()
-  const [p, setP] = useState(project)
-  const dirty = JSON.stringify(p) !== JSON.stringify(project)
-  const set = <K extends keyof Project>(k: K, v: Project[K]) => setP((x) => ({ ...x, [k]: v }))
+  // The saved office the form was loaded from (what "unsaved changes" compares against).
+  const [loaded, setLoaded] = useState(project)
+  const [form, setForm] = useState<OfficeForm>(() => toForm(project))
+  const [busy, setBusy] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const dirty = isDirty(form, loaded)
+  const set = <K extends keyof OfficeForm>(k: K, v: OfficeForm[K]) => setForm((f) => ({ ...f, [k]: v }))
+  const setSandbox = (patch: Partial<OfficeForm['sandbox']>) => setForm((f) => ({ ...f, sandbox: { ...f.sandbox, ...patch } }))
+  const limitsId = useId()
+  const allowId = useId()
+
+  // The app's copy can lag behind the main process (e.g. a permission granted for good during a task).
+  useEffect(() => {
+    let live = true
+    void latestProject(project).then((p) => {
+      if (!live || sameJson(p, project)) return
+      setLoaded(p)
+      setForm((f) => (sameJson(f, toForm(project)) ? toForm(p) : f))
+    })
+    return () => {
+      live = false
+    }
+  }, [project])
+
+  const save = async () => {
+    const f = { ...form, name: form.name.trim(), workspaceDir: form.workspaceDir.trim() }
+    if (!f.name) return notify(t.office.errName)
+    if (!f.workspaceDir) return notify(t.office.errFolder)
+    if (f.sandbox.kind === 'docker' && !f.sandbox.image.trim()) return notify(t.org.errImage)
+    setBusy(true)
+    try {
+      const next = saveForm(f, loaded, await latestProject(loaded))
+      await onSave(next)
+      setLoaded(next)
+      setForm(toForm(next))
+      notify(t.common.saved)
+    } catch (e) {
+      notify(errText(e, t))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const exportOffice = async () => {
+    setExporting(true)
+    try {
+      const file = await window.office.exportProject(project.id)
+      if (file) notify(t.org.exported(baseName(file)))
+    } catch (e) {
+      notify(errText(e, t))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const remove = async () => {
+    try {
+      await onDelete()
+    } catch (e) {
+      notify(errText(e, t))
+    }
+  }
+
+  const docker = form.sandbox.kind === 'docker'
+  const limit = (k: 'maxRequests' | 'maxChatter' | 'compactAt', label: string, hint: string, step: number) => (
+    <Row label={label} hint={hint}>
+      <input className="input num org-num" type="number" min={0} step={step} inputMode="numeric" value={form[k]} placeholder="0" onChange={(e) => set(k, e.target.value)} />
+    </Row>
+  )
 
   return (
     <div className="page">
@@ -48,17 +144,45 @@ export default function Settings({ project, onSave, onDelete, notify }: Props) {
       <div className="stack">
         <div className="grid2">
           <Field label={t.office.name}>
-            <input className="input" value={p.name} onChange={(e) => set('name', e.target.value)} />
+            <input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} />
           </Field>
           <Field label={t.office.budget} hint={t.office.budgetHint}>
-            <input className="input num" type="number" min={0} step={0.5} value={p.budgetUsd} onChange={(e) => set('budgetUsd', Math.max(0, Number(e.target.value)))} />
+            <input className="input num" type="number" min={0} step={0.5} value={form.budget} placeholder="0" onChange={(e) => set('budget', e.target.value)} />
           </Field>
         </div>
-        <FolderField value={p.workspaceDir} onChange={(v) => set('workspaceDir', v)} />
+        <FolderField value={form.workspaceDir} onChange={(v) => set('workspaceDir', v)} />
         <Field label={t.office.briefing} hint={t.office.briefingHint}>
-          <textarea className="textarea" rows={10} value={p.briefing} onChange={(e) => set('briefing', e.target.value)} placeholder={t.office.briefingPlaceholder} />
+          <textarea className="textarea" rows={10} value={form.briefing} onChange={(e) => set('briefing', e.target.value)} placeholder={t.office.briefingPlaceholder} />
         </Field>
       </div>
+
+      <div className="section">
+        <div className="section-head">
+          <h3>{t.org.workflow}</h3>
+        </div>
+        <div className="list">
+          <Row label={t.org.planFirst} hint={t.org.planFirstHint}>
+            <Switch on={form.planFirst} label={t.org.planFirst} onChange={(v) => set('planFirst', v)} />
+          </Row>
+          <Row label={t.org.checkpoints} hint={t.org.checkpointsHint}>
+            <Switch on={form.checkpoints} label={t.org.checkpoints} onChange={(v) => set('checkpoints', v)} />
+          </Row>
+        </div>
+      </div>
+
+      <section className="section" aria-labelledby={limitsId}>
+        <div className="section-head">
+          <div>
+            <h3 id={limitsId}>{t.org.limits}</h3>
+            <p>{t.org.limitsHint}</p>
+          </div>
+        </div>
+        <div className="list">
+          {limit('maxRequests', t.org.maxRequests, t.org.maxRequestsHint, 10)}
+          {limit('maxChatter', t.org.maxChatter, t.org.maxChatterHint, 1)}
+          {limit('compactAt', t.org.compactAt, t.org.compactAtHint, 10_000)}
+        </div>
+      </section>
 
       <div className="section">
         <div className="section-head">
@@ -67,12 +191,95 @@ export default function Settings({ project, onSave, onDelete, notify }: Props) {
             <p>{t.office.commandsHint}</p>
           </div>
         </div>
-        <div className="stack tight">
-          <div className="seg">
-            <button className={p.approval === 'ask' ? 'on' : ''} onClick={() => set('approval', 'ask')}>{t.office.ask}</button>
-            <button className={p.approval === 'auto' ? 'on' : ''} onClick={() => set('approval', 'auto')}>{t.office.auto}</button>
+        <div className="stack">
+          <div className="stack tight">
+            <Seg
+              label={t.office.commands}
+              value={form.approval}
+              options={[['ask', t.office.ask], ['auto', t.office.auto]]}
+              onChange={(v) => set('approval', v)}
+            />
+            {form.approval === 'auto' && <div className="note warn">{docker ? t.org.autoDocker : t.office.autoWarn}</div>}
           </div>
-          {p.approval === 'auto' && <div className="note warn">{t.office.autoWarn}</div>}
+          <div className="field">
+            <span>{t.org.sandbox}</span>
+            <Seg
+              label={t.org.sandbox}
+              value={form.sandbox.kind}
+              options={[['none', t.org.sandboxNone], ['docker', t.org.sandboxDocker]]}
+              onChange={(kind) => setSandbox({ kind, image: form.sandbox.image.trim() || DEFAULT_SANDBOX.image })}
+            />
+          </div>
+          {docker && (
+            <div className="stack tight">
+              <div className="list">
+                <Row label={t.org.image} hint={t.org.imageHint}>
+                  <input
+                    className="input mono org-image"
+                    value={form.sandbox.image}
+                    placeholder={DEFAULT_SANDBOX.image}
+                    aria-invalid={!form.sandbox.image.trim()}
+                    onChange={(e) => setSandbox({ image: e.target.value })}
+                  />
+                </Row>
+                <Row label={t.org.network} hint={t.org.networkHint}>
+                  <Switch on={form.sandbox.network} label={t.org.network} onChange={(network) => setSandbox({ network })} />
+                </Row>
+              </div>
+              <div className="note">{t.org.dockerNote}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <section className="section" aria-labelledby={allowId}>
+        <div className="section-head">
+          <div>
+            <h3 id={allowId}>{t.org.allowed}</h3>
+            <p>{t.org.allowedHint}</p>
+          </div>
+        </div>
+        <div className="list">
+          {form.allowCommands.length ? (
+            <ul className="org-allow">
+              {form.allowCommands.map((entry) => {
+                const { kind, text } = allowEntry(entry)
+                return (
+                  <li key={entry} className="list-row">
+                    <Icon name={ALLOW_ICONS[kind]} size={15} className="faint" />
+                    <span className={`spacer ellipsis ${kind === 'mcp' ? '' : 'mono'}`} title={text}>{text}</span>
+                    <span className="tag">{t.org.allowKinds[kind]}</span>
+                    <button
+                      type="button"
+                      className="btn quiet icon sm"
+                      title={t.org.remove(text)}
+                      aria-label={t.org.remove(text)}
+                      onClick={() => set('allowCommands', form.allowCommands.filter((x) => x !== entry))}
+                    >
+                      <Icon name="x" size={14} />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <div className="list-empty">{t.org.allowedNone}</div>
+          )}
+        </div>
+      </section>
+
+      <div className="section">
+        <div className="list">
+          <div className="list-row">
+            <div className="spacer">
+              <div style={{ fontWeight: 600 }}>{t.org.exportTitle}</div>
+              <div className="muted small">{t.org.exportHint}</div>
+              {dirty && <div className="small org-warn">{t.org.exportSaveFirst}</div>}
+            </div>
+            <button type="button" className="btn" onClick={exportOffice} disabled={dirty || exporting}>
+              <Icon name="download" size={14} /> {t.org.exportButton}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -83,7 +290,7 @@ export default function Settings({ project, onSave, onDelete, notify }: Props) {
               <div style={{ fontWeight: 600 }}>{t.office.danger}</div>
               <div className="muted small">{t.office.dangerHint}</div>
             </div>
-            <ConfirmButton onConfirm={onDelete}>{t.common.delete}</ConfirmButton>
+            <ConfirmButton onConfirm={remove}>{t.common.delete}</ConfirmButton>
           </div>
         </div>
       </div>
@@ -91,23 +298,25 @@ export default function Settings({ project, onSave, onDelete, notify }: Props) {
       {dirty && (
         <div className="savebar inline" role="status">
           {t.common.unsaved}
-          <button className="btn quiet sm" onClick={() => setP(project)}>{t.common.discard}</button>
-          <button className="btn primary sm" onClick={async () => { await onSave(p); notify(t.common.saved) }}>{t.common.save}</button>
+          <button className="btn quiet sm" onClick={() => setForm(toForm(loaded))} disabled={busy}>{t.common.discard}</button>
+          <button className="btn primary sm" onClick={save} disabled={busy}>{busy ? t.common.saving : t.common.save}</button>
         </div>
       )}
     </div>
   )
 }
 
-export function NewProject({ providers, onClose, onCreate, onProviders }: { providers: Provider[]; onClose(): void; onCreate(p: Project): void; onProviders(): void }) {
+export function NewProject({ providers, onClose, onCreate, onProviders }: { providers: Provider[]; onClose(): void; onCreate(p: Project): void | Promise<void>; onProviders(): void }) {
   const t = useT()
   const usable = providers.filter((p) => p.hasKey || p.baseURL.includes('localhost'))
   const [name, setName] = useState('')
-  const [tpl, setTpl] = useState(0)
+  const [tpl, setTpl] = useState<TeamTemplate['id']>('software')
   const [providerId, setProviderId] = useState(usable[0]?.id ?? '')
   const [model, setModel] = useState('')
+  const [worker, setWorker] = useState<ModelRef>({ providerId: '', model: '' })
   const [dir, setDir] = useState('')
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
 
   if (!usable.length) {
     return (
@@ -119,12 +328,26 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
     )
   }
 
-  const create = () => {
+  const template = TEMPLATES.find((x) => x.id === tpl) ?? TEMPLATES[0]
+  // The blank template is only the CEO: there is nobody to give a worker model.
+  const hasWorkers = template.id !== 'blank'
+  const hasKey = (id: string) => providers.find((p) => p.id === id)?.hasKey
+
+  const create = async () => {
     if (!name.trim()) return setErr(t.office.errName)
     if (!dir.trim()) return setErr(t.office.errFolder)
     if (!providerId || !model.trim()) return setErr(t.office.errModel)
-    const agents = TEMPLATES[tpl].build(t.names, providerId, model.trim())
-    onCreate({ id: uid(), name: name.trim(), workspaceDir: dir.trim(), briefing: '', approval: 'ask', budgetUsd: 5, agents })
+    if (hasWorkers && worker.providerId && !worker.model.trim()) return setErr(t.org.errWorkerModel)
+    const agents = withWorkerModel(template.build(t.names, providerId, model.trim()), hasWorkers ? worker : null)
+    setErr('')
+    setBusy(true)
+    try {
+      await onCreate({ id: uid(), name: name.trim(), workspaceDir: dir.trim(), briefing: '', approval: 'ask', budgetUsd: 5, agents })
+    } catch (e) {
+      setErr(errText(e, t))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -135,7 +358,7 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
       footer={
         <>
           <button className="btn" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn primary" onClick={create}>{t.office.create}</button>
+          <button className="btn primary" onClick={create} disabled={busy}>{t.office.create}</button>
         </>
       }
     >
@@ -144,12 +367,13 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
           <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t.office.namePlaceholder} />
         </Field>
         <FolderField value={dir} onChange={setDir} />
-        <Field label={t.office.template} hint={t.office.templateHint}>
+        <div className="field" role="group" aria-label={t.office.template}>
+          <span>{t.office.template}</span>
           <div className="stack tight">
-            {TEMPLATES.map((tp, i) => {
-              const [title, desc] = t.templates[tp.id]
+            {TEMPLATES.map((tp) => {
+              const [title, desc] = t.org.templates[tp.id] ?? t.templates[tp.id] ?? [tp.id, '']
               return (
-                <button key={tp.id} type="button" className={`choice ${tpl === i ? 'on' : ''}`} onClick={() => setTpl(i)}>
+                <button key={tp.id} type="button" className={`choice ${tpl === tp.id ? 'on' : ''}`} aria-pressed={tpl === tp.id} onClick={() => setTpl(tp.id)}>
                   <div>
                     <div className="t">{title}</div>
                     <div className="d">{desc}</div>
@@ -158,17 +382,36 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
               )
             })}
           </div>
-        </Field>
+          <small>{t.office.templateHint}</small>
+        </div>
         <div className="grid2">
           <Field label={t.office.defaultProvider}>
             <select className="select" value={providerId} onChange={(e) => setProviderId(e.target.value)}>
               {usable.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
-          <Field label={t.office.defaultModel} hint={t.office.defaultModelHint}>
-            <ModelInput providerId={providerId} value={model} onChange={setModel} />
+          <Field label={t.office.defaultModel} hint={hasWorkers && worker.providerId ? t.org.ceoModelHint : t.office.defaultModelHint}>
+            <ModelInput providerId={providerId} hasKey={hasKey(providerId)} value={model} onChange={setModel} />
           </Field>
         </div>
+        {hasWorkers && (
+          <div className="stack tight">
+            <div className="grid2">
+              <Field label={t.org.workerModel}>
+                <select className="select" value={worker.providerId} onChange={(e) => setWorker({ providerId: e.target.value, model: e.target.value ? worker.model : '' })}>
+                  <option value="">{t.org.sameAsCeo}</option>
+                  {usable.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+              {worker.providerId && (
+                <Field label={t.team.model}>
+                  <ModelInput providerId={worker.providerId} hasKey={hasKey(worker.providerId)} value={worker.model} onChange={(m) => setWorker({ ...worker, model: m })} />
+                </Field>
+              )}
+            </div>
+            <small className="faint">{t.org.workerModelHint}</small>
+          </div>
+        )}
         {err && <div className="note danger" role="alert">{err}</div>}
       </div>
     </Modal>
