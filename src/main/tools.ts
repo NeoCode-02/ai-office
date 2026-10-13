@@ -71,6 +71,12 @@ export const TOOL_DEFS: Record<ToolName, ToolDef> = {
     name: 'report_to_user',
     description: 'CEO only. Final report to the owner once the goal is fully done and verified. Ends the work session.',
     parameters: params({ summary: str('What was delivered, where, how it was verified, open issues') }, ['summary'])
+  },
+  propose_plan: {
+    name: 'propose_plan',
+    description:
+      'CEO only, when the owner wants to approve a plan first. Send the plan (steps, who does what, deliverables, how it will be verified). Then end your turn and wait: you cannot delegate or change files until the owner approves.',
+    parameters: params({ text: str('The plan') }, ['text'])
   }
 }
 
@@ -79,6 +85,8 @@ export interface ToolCtx {
   send(to: string[], text: string): string
   remember(note: string): void
   report(summary: string): void
+  /** propose_plan; returns the text the model gets back. */
+  plan?(text: string): string
   approve(command: string): Promise<boolean>
   skill(name: string): { body: string; dir?: string } | undefined
 }
@@ -233,6 +241,8 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
       case 'report_to_user':
         ctx.report(s('summary'))
         return ok('Report delivered to the owner')
+      case 'propose_plan':
+        return ctx.plan ? ok(ctx.plan(s('text'))) : fail('Plans are not used in this office')
     }
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e))

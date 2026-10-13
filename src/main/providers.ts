@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
-import type { ProviderKind, Usage } from '../shared/types'
+import type { Preset, ProviderKind, Usage } from '../shared/types'
 
 export interface ToolDef {
   name: string
@@ -209,13 +209,6 @@ function parseArgs(s: string): Record<string, unknown> {
   } catch {
     return { __invalid_json: s }
   }
-}
-
-export interface Preset {
-  name: string
-  kind: ProviderKind
-  baseURL: string
-  keyUrl: string
 }
 
 /** Where users get keys. Any other OpenAI-compatible endpoint can be added as "Custom". */

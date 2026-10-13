@@ -1,7 +1,13 @@
 import { useSyncExternalStore } from 'react'
+import org from './i18n/org'
+import run from './i18n/run'
+import shell from './i18n/shell'
 
 const en = {
   lang: 'English',
+  run: run.en,
+  org: org.en,
+  shell: shell.en,
   common: {
     save: 'Save',
     cancel: 'Cancel',
@@ -137,7 +143,8 @@ const en = {
       web_fetch: 'fetched',
       remember: 'noted',
       use_skill: 'used skill',
-      read_skill_file: 'read skill file'
+      read_skill_file: 'read skill file',
+      propose_plan: 'proposed a plan'
     } as Record<string, string>,
     usedTool: 'used',
     error: 'failed',
@@ -203,7 +210,8 @@ const en = {
       remember: 'Remember',
       use_skill: 'Skills',
       read_skill_file: 'Skill files',
-      report_to_user: 'Report to owner'
+      report_to_user: 'Report to owner',
+      propose_plan: 'Propose a plan'
     }
   },
   office: {
@@ -415,7 +423,25 @@ const en = {
     E_ORG_DUP: (n: string) => `The name “${n}” is used twice.`,
     E_ORG_MODEL: (n: string) => `${n}: choose a provider and model.`,
     E_ORG_BOSS: (n: string) => `${n}: manager not found.`,
-    E_ORG_CYCLE: (n: string) => `${n}: the reporting line loops back on itself.`
+    E_ORG_CYCLE: (n: string) => `${n}: the reporting line loops back on itself.`,
+    E_NOT_IMPLEMENTED: 'This feature is not ready yet.',
+    E_BAD_ARGS: 'The app sent an invalid request. Restart it and try again.',
+    E_BUDGET_SPENT: (usd: string) => `The budget of $${usd} for this task is used up. Raise it to continue.`,
+    E_CAP_REACHED: (p: string) =>
+      p === 'month'
+        ? 'The monthly spending cap is reached. Raise it in Settings → General to continue.'
+        : 'The daily spending cap is reached. Raise it in Settings → General to continue.',
+    E_PROVIDER_IN_USE: (n: string) => `Still used by: ${n}. Give them another provider first, or delete anyway.`,
+    E_NO_GIT: 'Git is not installed, so changes can’t be tracked or undone. Install Git to use this.',
+    E_CHECKPOINT_TOO_BIG: 'The workspace is too big to track changes (more than 20,000 files).',
+    E_NO_CHECKPOINT: 'No snapshot was taken for this task, so its changes can’t be shown.',
+    E_NOT_GIT_REPO: 'The workspace is not a Git repository.',
+    E_NOTHING_TO_COMMIT: 'There is nothing to commit.',
+    E_GIT: (m: string) => `Git failed: ${m}`,
+    E_RUN_ACTIVE: 'Stop the work first.',
+    E_BAD_FILE: 'That file is not an AI Office export.',
+    E_UPDATE: (s: string) => `Could not check for updates (HTTP ${s}).`,
+    E_NO_DOCKER: 'Docker is not running. Start Docker or turn off the sandbox in the office settings.'
   } as Record<string, string | ((p: string) => string)>
 }
 
@@ -423,6 +449,9 @@ export type Dict = typeof en
 
 const uz: Dict = {
   lang: 'O‘zbekcha',
+  run: run.uz,
+  org: org.uz,
+  shell: shell.uz,
   common: {
     save: 'Saqlash',
     cancel: 'Bekor qilish',
@@ -558,7 +587,8 @@ const uz: Dict = {
       web_fetch: 'yukladi',
       remember: 'eslab qoldi',
       use_skill: 'skilldan foydalandi',
-      read_skill_file: 'skill faylini o‘qidi'
+      read_skill_file: 'skill faylini o‘qidi',
+      propose_plan: 'reja taklif qildi'
     },
     usedTool: 'foydalandi',
     error: 'xato',
@@ -624,7 +654,8 @@ const uz: Dict = {
       remember: 'Eslab qolish',
       use_skill: 'Skilllar',
       read_skill_file: 'Skill fayllari',
-      report_to_user: 'Egaga hisobot'
+      report_to_user: 'Egaga hisobot',
+      propose_plan: 'Reja taklif qilish'
     }
   },
   office: {
@@ -836,7 +867,25 @@ const uz: Dict = {
     E_ORG_DUP: (n: string) => `“${n}” ismi ikki marta ishlatilgan.`,
     E_ORG_MODEL: (n: string) => `${n}: provayder va model tanlang.`,
     E_ORG_BOSS: (n: string) => `${n}: boshlig‘i topilmadi.`,
-    E_ORG_CYCLE: (n: string) => `${n}: hisobot zanjiri aylanib qolgan.`
+    E_ORG_CYCLE: (n: string) => `${n}: hisobot zanjiri aylanib qolgan.`,
+    E_NOT_IMPLEMENTED: 'Bu imkoniyat hali tayyor emas.',
+    E_BAD_ARGS: 'Ilova noto‘g‘ri so‘rov yubordi. Qayta ishga tushirib ko‘ring.',
+    E_BUDGET_SPENT: (usd: string) => `Bu vazifa uchun $${usd} byudjet tugadi. Davom etish uchun byudjetni oshiring.`,
+    E_CAP_REACHED: (p: string) =>
+      p === 'month'
+        ? 'Oylik xarajat chegarasiga yetildi. Davom etish uchun uni Sozlamalar → Umumiy bo‘limida oshiring.'
+        : 'Kunlik xarajat chegarasiga yetildi. Davom etish uchun uni Sozlamalar → Umumiy bo‘limida oshiring.',
+    E_PROVIDER_IN_USE: (n: string) => `Hali ishlatilmoqda: ${n}. Avval ularga boshqa provayder tanlang yoki baribir o‘chiring.`,
+    E_NO_GIT: 'Git o‘rnatilmagan, shuning uchun o‘zgarishlarni kuzatib ham, bekor qilib ham bo‘lmaydi. Buning uchun Git o‘rnating.',
+    E_CHECKPOINT_TOO_BIG: 'Ish papkasi o‘zgarishlarni kuzatish uchun juda katta (20 000 dan ortiq fayl).',
+    E_NO_CHECKPOINT: 'Bu vazifa uchun nusxa olinmagan, shuning uchun o‘zgarishlarni ko‘rsatib bo‘lmaydi.',
+    E_NOT_GIT_REPO: 'Ish papkasi Git repozitoriysi emas.',
+    E_NOTHING_TO_COMMIT: 'Commit qiladigan o‘zgarish yo‘q.',
+    E_GIT: (m: string) => `Git xatosi: ${m}`,
+    E_RUN_ACTIVE: 'Avval ishni to‘xtating.',
+    E_BAD_FILE: 'Bu fayl AI Office eksporti emas.',
+    E_UPDATE: (s: string) => `Yangilanishni tekshirib bo‘lmadi (HTTP ${s}).`,
+    E_NO_DOCKER: 'Docker ishlamayapti. Docker’ni ishga tushiring yoki ofis sozlamalarida sandbox’ni o‘chiring.'
   }
 }
 
@@ -857,6 +906,8 @@ function initial(): Lang {
 }
 
 let current: Lang = initial()
+// index.html ships lang="uz"; screen readers need the language actually shown.
+if (typeof document !== 'undefined') document.documentElement.lang = current
 
 export function setLang(l: Lang) {
   current = l
