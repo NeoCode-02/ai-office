@@ -68,7 +68,7 @@ export interface Agent {
   providerId: string
   model: string
   /** Used for the rest of a run when the main model fails (no credit, bad key, model gone). */
-  backup?: { providerId: string; model: string }
+  backup?: ModelRef
   tools: ToolName[]
   /** MCP server ids this agent may use. */
   mcpServers?: string[]
@@ -84,7 +84,13 @@ export interface Project {
   agents: Agent[]
 }
 
-export type AgentStatus = 'idle' | 'working' | 'waiting'
+export type AgentStatus = 'idle' | 'working' | 'waiting' | 'blocked'
+/** Why a model request failed; see src/main/errors.ts. */
+export type ErrorKind = 'rate' | 'server' | 'network' | 'quota' | 'auth' | 'model' | 'context' | 'config' | 'other'
+export interface ModelRef {
+  providerId: string
+  model: string
+}
 export type RunState = 'running' | 'done' | 'stopped' | 'error'
 
 export type OfficeEvent =
@@ -95,6 +101,13 @@ export type OfficeEvent =
   | { type: 'cost'; agentId: string; providerId?: string; model?: string; usd: number | null; usage?: Usage; inTok?: number; outTok?: number; at: number }
   | { type: 'approval'; id: string; agentId: string; kind: 'command' | 'mcp'; command: string; at: number }
   | { type: 'approval_done'; id: string; approved: boolean; at: number }
+  /** A request failed with a temporary error; the member retries after waitMs. */
+  | { type: 'notice'; agentId: string; kind: ErrorKind; attempt: number; of: number; waitMs: number; at: number }
+  /** The member moved to its backup model for the rest of the run. */
+  | { type: 'switch'; agentId: string; from: ModelRef; to: ModelRef; kind: ErrorKind; detail: string; at: number }
+  /** The member stopped and waits for the owner (retry or another model). */
+  | { type: 'blocked'; id: string; agentId: string; providerId: string; model: string; kind: ErrorKind; detail: string; at: number }
+  | { type: 'unblocked'; id: string; agentId: string; at: number }
   /** reason is a code: owner_stopped | new_task | idle | report | budget (usd set) */
   | { type: 'run'; runId: string; state: RunState; reason?: string; usd?: number; at: number }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import os from 'node:os'
-import { SYSTEM, USER, type Agent, type OfficeEvent, type Project, type ToolName, type Usage } from '../shared/types'
+import { SYSTEM, USER, type Agent, type ModelRef, type OfficeEvent, type Project, type ToolName, type Usage } from '../shared/types'
+import { classify, type Classified } from './errors'
 import type { McpToolbox } from './mcp'
 import { openChat, type Chat, type Conn, type ToolResult } from './providers'
 import { runTool, TOOL_DEFS } from './tools'
@@ -22,9 +23,15 @@ export interface OfficeDeps {
   skills?(): SkillInfo[]
   mcp?(serverIds: string[]): Promise<McpToolbox>
   openChat?: typeof openChat
+  /** Replaces the retry wait (tests). */
+  sleep?(ms: number): Promise<void>
 }
 
 const MAX_STEPS = 40 // tool-loop steps per wake-up
+// Waits between retries of a temporary error; a provider's retry-after wins, up to MAX_WAIT.
+const RETRY_DELAYS = [5, 15, 30, 60, 120, 120].map((s) => s * 1000)
+const MAX_WAIT = 300_000
+const LOG_CHARS = 30_000 // work log handed to a backup model
 
 /** Checks the org chart. Returns an error code (`CODE` or `CODE|name`) or null. */
 export function validateOrg(agents: Agent[]): string | null {
@@ -96,6 +103,15 @@ interface Member {
   inbox: string[]
   open: ToolResult[]
   busy: boolean
+  /** Plain-text record of the member's work, for handing over to another model. */
+  log: string[]
+  /** Model in use when it is not the agent's own (backup or owner's choice). */
+  override?: ModelRef
+  onBackup?: boolean
+  /** The next chat starts on a new model and gets the work log first. */
+  handoff?: boolean
+  blocked?: { id: string; input?: string; results: ToolResult[] }
+  resume?: { input?: string; results: ToolResult[] }
 }
 
 export class Office {
@@ -103,6 +119,7 @@ export class Office {
   private members = new Map<string, Member>()
   private approvals = new Map<string, (ok: boolean) => void>()
   private running = false
+  private wakers = new Set<() => void>()
   private spent = 0
   private ceo: Agent
 
@@ -112,7 +129,7 @@ export class Office {
   ) {
     const err = validateOrg(project.agents)
     if (err) throw new Error(err)
-    for (const a of project.agents) this.members.set(a.id, { agent: a, inbox: [], open: [], busy: false })
+    for (const a of project.agents) this.members.set(a.id, { agent: a, inbox: [], open: [], busy: false, log: [] })
     this.ceo = project.agents.find((a) => !a.reportsTo)!
   }
 
@@ -135,9 +152,34 @@ export class Office {
     if (!this.running) return
     for (const resolve of this.approvals.values()) resolve(false)
     this.approvals.clear()
-    for (const m of this.members.values()) m.inbox = []
+    for (const w of [...this.wakers]) w()
+    for (const m of this.members.values()) {
+      m.inbox = []
+      m.resume = undefined
+      if (m.blocked) {
+        m.open = m.chat ? m.blocked.results : []
+        this.emit({ type: 'unblocked', id: m.blocked.id, agentId: m.agent.id, at: Date.now() })
+        m.blocked = undefined
+      }
+    }
     this.running = false
     this.emit({ type: 'run', runId: this.runId, state: 'stopped', reason, usd, at: Date.now() })
+  }
+
+  /** Owner's answer to a blocked member: try again, optionally on another model. */
+  retry(agentId: string, model?: ModelRef) {
+    const m = this.members.get(agentId)
+    if (!m?.blocked || !this.running) return
+    const { id, input, results } = m.blocked
+    m.blocked = undefined
+    this.emit({ type: 'unblocked', id, agentId, at: Date.now() })
+    if (model) {
+      m.override = model
+      m.chat = undefined
+      m.handoff = true
+    }
+    m.resume = { input, results: m.chat ? results : [] }
+    void this.wake(m)
   }
 
   answer(approvalId: string, ok: boolean) {
@@ -177,22 +219,25 @@ export class Office {
     m.busy = true
     this.emit({ type: 'status', agentId: m.agent.id, status: 'working', at: Date.now() })
     try {
-      while (this.running && m.inbox.length) {
-        const text = m.inbox.splice(0).join('\n\n')
-        await this.work(m, text)
+      while (this.running && !m.blocked && (m.resume || m.inbox.length)) {
+        const r = m.resume
+        m.resume = undefined
+        if (r) await this.work(m, r.input, r.results)
+        else await this.work(m, m.inbox.splice(0).join('\n\n'))
       }
     } catch (e) {
       this.system(`${m.agent.name}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       m.busy = false
-      this.emit({ type: 'status', agentId: m.agent.id, status: 'idle', at: Date.now() })
+      this.emit({ type: 'status', agentId: m.agent.id, status: m.blocked ? 'blocked' : 'idle', at: Date.now() })
       this.checkIdle()
     }
   }
 
   private checkIdle() {
     if (!this.running) return
-    for (const m of this.members.values()) if (m.busy || m.inbox.length) return
+    // A blocked member keeps the run open until the owner answers.
+    for (const m of this.members.values()) if (m.busy || m.inbox.length || m.blocked) return
     this.setRunning(false, 'idle')
   }
 
@@ -204,30 +249,126 @@ export class Office {
     return [...new Set([...own, ...extra])]
   }
 
+  private current(m: Member): ModelRef {
+    return m.override ?? { providerId: m.agent.providerId, model: m.agent.model }
+  }
+
+  private log(m: Member, entry: string) {
+    m.log.push(entry.length > 4000 ? `${entry.slice(0, 4000)}…` : entry)
+    let size = m.log.reduce((n, e) => n + e.length, 0)
+    while (size > LOG_CHARS && m.log.length > 1) size -= m.log.shift()!.length
+  }
+
+  /** Cancelled by stop(), so a long retry wait never outlives the run. */
+  private pause(ms: number): Promise<void> {
+    if (this.deps.sleep) return this.deps.sleep(ms)
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer)
+        this.wakers.delete(done)
+        resolve()
+      }
+      const timer = setTimeout(done, ms)
+      this.wakers.add(done)
+    })
+  }
+
+  /** A hard failure: move to the backup model once, otherwise stop and ask the owner. */
+  private fail(m: Member, c: Classified): 'switched' | 'blocked' {
+    const from = this.current(m)
+    const b = m.agent.backup
+    if (b?.providerId && b.model.trim() && !m.onBackup) {
+      m.onBackup = true
+      m.override = { providerId: b.providerId, model: b.model.trim() }
+      m.chat = undefined
+      m.handoff = true
+      this.emit({ type: 'switch', agentId: m.agent.id, from, to: m.override, kind: c.kind, detail: c.detail, at: Date.now() })
+      return 'switched'
+    }
+    const id = randomUUID()
+    m.blocked = { id, results: [] }
+    this.emit({ type: 'blocked', id, agentId: m.agent.id, ...from, kind: c.kind, detail: c.detail, at: Date.now() })
+    return 'blocked'
+  }
+
+  /** Opens the chat on the member's current model; false when it ended up blocked. */
+  private connect(m: Member, allowed: ToolName[], skills: SkillInfo[]): boolean {
+    for (;;) {
+      const cur = this.current(m)
+      try {
+        m.chat = (this.deps.openChat ?? openChat)(
+          this.deps.conn(cur.providerId),
+          cur.model,
+          systemPrompt(this.project, m.agent, this.deps.readNotes(m.agent.id), skills),
+          [...allowed.map((t) => TOOL_DEFS[t]), ...(m.mcp?.defs ?? [])]
+        )
+        return true
+      } catch (e) {
+        if (this.fail(m, classify(e)) === 'blocked') return false
+      }
+    }
+  }
+
+  /** One model request, retrying temporary errors. */
+  private async ask(m: Member, results: ToolResult[], input?: string) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await m.chat!.step(results, input)
+      } catch (e) {
+        if (!this.running) return 'stopped'
+        const c = classify(e)
+        if (!c.retry || attempt >= RETRY_DELAYS.length) return this.fail(m, c)
+        const waitMs = Math.min(c.retryAfterMs ?? RETRY_DELAYS[attempt], MAX_WAIT)
+        this.emit({ type: 'notice', agentId: m.agent.id, kind: c.kind, attempt: attempt + 1, of: RETRY_DELAYS.length, waitMs, at: Date.now() })
+        await this.pause(waitMs)
+        if (!this.running) return 'stopped'
+      }
+    }
+  }
+
+  private handoff(m: Member, input?: string): string {
+    const log = m.log.join('\n\n')
+    const extra = input && !log.includes(input) ? `\n\n${input}` : ''
+    return `Your previous AI model stopped working, so you now run on a different model. Your earlier conversation is not available; this is your recent work log:\n\n${log || '(empty)'}\n\nContinue your job from where you left off.${extra}`
+  }
+
   /** One wake-up: model ↔ tools until it stops calling tools. */
-  private async work(m: Member, text: string) {
+  private async work(m: Member, text?: string, carried?: ToolResult[]) {
     const a = m.agent
     const skills = this.deps.skills?.() ?? []
     const allowed = this.tools(a, skills.length > 0)
-    if (!m.chat) {
-      if (a.mcpServers?.length && this.deps.mcp) {
-        m.mcp = await this.deps.mcp(a.mcpServers)
-        for (const err of m.mcp.errors) this.system(`${a.name}: MCP ${err}`)
-      }
-      m.chat = (this.deps.openChat ?? openChat)(
-        this.deps.conn(a.providerId),
-        a.model,
-        systemPrompt(this.project, a, this.deps.readNotes(a.id), skills),
-        [...allowed.map((t) => TOOL_DEFS[t]), ...(m.mcp?.defs ?? [])]
-      )
+    let results = carried ?? m.open.splice(0)
+    let input: string | undefined = text
+    if (text && !carried) this.log(m, text)
+    const park = () => {
+      m.blocked!.input = input
+      m.blocked!.results = results
+    }
+
+    if (!m.mcp && a.mcpServers?.length && this.deps.mcp) {
+      m.mcp = await this.deps.mcp(a.mcpServers)
+      for (const err of m.mcp.errors) this.system(`${a.name}: MCP ${err}`)
+    }
+    if (!m.chat && !this.connect(m, allowed, skills)) return park()
+    if (m.handoff) {
+      m.handoff = false
+      input = this.handoff(m, input)
+      results = []
     }
     let sent = false
-    let results = m.open.splice(0)
-    let input: string | undefined = text
 
     for (let step = 0; ; step++) {
       if (step === MAX_STEPS) input = 'Step limit reached. Stop now and report your progress.'
-      const turn = await m.chat.step(results, input)
+      const turn = await this.ask(m, results, input)
+      if (turn === 'stopped') {
+        m.open = results
+        return
+      }
+      if (turn === 'blocked') return park()
+      if (turn === 'switched') {
+        m.resume = { input, results: [] }
+        return
+      }
       input = undefined
       this.charge(m, turn.usage)
       if (!turn.calls.length) {
@@ -263,6 +404,7 @@ export class Office {
           })
         }
         if (call.name !== 'message' && call.name !== 'report_to_user') {
+          this.log(m, `[You used ${call.name}${summary ? `: ${summary}` : ''} — ${r.isError ? 'failed' : 'ok'}]`)
           this.emit({ type: 'tool', id: randomUUID(), at: Date.now(), agentId: a.id, name: call.name, summary, ok: !r.isError })
         }
         results.push({ id: call.id, content: r.content, isError: r.isError })
@@ -290,6 +432,7 @@ export class Office {
     if (!ids.length) return 'No recipients'
     this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: from.id, to: ids, text })
     const names = ids.map((id) => (id === USER ? 'owner' : this.members.get(id)!.agent.name)).join(', ')
+    this.log(this.members.get(from.id)!, `[You → ${names}] ${text}`)
     for (const id of ids) {
       if (id !== USER) this.deliver(id, `[From ${from.name} — ${from.title} → ${names}] ${text}`)
     }
@@ -302,6 +445,7 @@ export class Office {
   }
 
   private report(summary: string) {
+    this.log(this.members.get(this.ceo.id)!, `[You → owner, final report] ${summary}`)
     this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: this.ceo.id, to: [USER], text: summary })
     for (const m of this.members.values()) m.inbox = []
     this.setRunning(false, 'report')
@@ -322,9 +466,10 @@ export class Office {
 
   private charge(m: Member, usage: Usage) {
     const a = m.agent
-    const usd = this.deps.charge(a.providerId, a.model, usage)
+    const { providerId, model } = this.current(m)
+    const usd = this.deps.charge(providerId, model, usage)
     this.spent += usd ?? 0
-    this.emit({ type: 'cost', agentId: a.id, providerId: a.providerId, model: a.model, usd, usage, at: Date.now() })
+    this.emit({ type: 'cost', agentId: a.id, providerId, model, usd, usage, at: Date.now() })
     if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) this.stop('budget', this.spent)
   }
 }

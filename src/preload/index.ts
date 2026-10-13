@@ -11,7 +11,7 @@ const names: Record<keyof Api, true> = {
   listSkills: true, setSkillEnabled: true, createSkill: true, importSkill: true, deleteSkill: true,
   listPlugins: true, importPlugin: true, setPluginEnabled: true, deletePlugin: true, pluginRoles: true,
   listMcp: true, saveMcp: true, deleteMcp: true, testMcp: true,
-  listRuns: true, readRun: true, activeRun: true, start: true, post: true, stop: true, answer: true
+  listRuns: true, readRun: true, activeRun: true, start: true, post: true, stop: true, retryAgent: true, answer: true
 }
 
 const api = Object.fromEntries(Object.keys(names).map((n) => [n, (...a: unknown[]) => ipcRenderer.invoke(n, ...a)])) as Async<Api>

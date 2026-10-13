@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { McpServer, OfficeEvent, Price, Project, Provider } from '../shared/types'
+import { SYSTEM, type McpServer, type ModelRef, type OfficeEvent, type Price, type Project, type Provider } from '../shared/types'
 import { balance } from './balance'
 import { charge, fetchCatalog, matchCatalog, priceOf } from './billing'
 import { quotaUse, stats, windowStart } from './stats'
@@ -180,6 +181,15 @@ const handlers = {
     offices.set(projectId, { office, pool })
     store.saveRun(projectId, { id: runId, goal, startedAt: Date.now(), state: 'running' })
     office.start(goal)
+    // OpenRouter reports the billed cost itself; elsewhere pay-per-token needs a price.
+    const unpriced = p.agents.filter((a) => {
+      const prov = store.provider(a.providerId)
+      return prov?.billing.mode === 'payg' && !/openrouter\.ai/.test(prov.baseURL) && !priceOf(prov, a.model)
+    })
+    if (unpriced.length) {
+      const text = `E_UNPRICED|${unpriced.map((a) => `${a.name} (${a.model})`).join(', ')}`
+      emit(projectId, runId, { type: 'message', id: randomUUID(), at: Date.now(), from: SYSTEM, to: [], text })
+    }
     return runId
   },
   post: (projectId: string, text: string, to?: string) => {
@@ -188,6 +198,7 @@ const handlers = {
     o.office.post(text, to)
   },
   stop: (projectId: string) => offices.get(projectId)?.office.stop(),
+  retryAgent: (projectId: string, agentId: string, model?: ModelRef) => offices.get(projectId)?.office.retry(agentId, model),
   answer: (projectId: string, approvalId: string, ok: boolean) => offices.get(projectId)?.office.answer(approvalId, ok)
 }
 export type Api = typeof handlers
