@@ -29,7 +29,7 @@
     "start": "electron-vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --dir src",
     "dist": "electron-vite build && electron-builder"
   },
   "dependencies": {},

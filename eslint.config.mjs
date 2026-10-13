@@ -4,7 +4,7 @@ import hooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 
 export default tseslint.config(
-  { ignores: ['out', 'dist', 'node_modules'] },
+  { ignores: ['out', 'dist', 'node_modules', '.claude'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   hooks.configs.flat['recommended-latest'] ?? hooks.configs['recommended-latest'],
