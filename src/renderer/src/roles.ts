@@ -57,8 +57,9 @@ const stockDepartment = (d: string) => !d.trim() || ROLES.some((r) => same(r.dep
 export function changeRole(agent: Agent, title: string, pluginRoles: RoleTemplate[] = []): Partial<Agent> {
   const r = roleByTitle(title)
   const role = r ?? pluginRoles.find((x) => same(x.title, title))
+  // The title stays as typed: matching a role only fills in its defaults.
   if (!role) return { title }
-  const patch: Partial<Agent> = { title: role.title }
+  const patch: Partial<Agent> = { title }
   if (r && stockDepartment(agent.department)) patch.department = r.department
   if (isStockInstructions(agent.instructions, pluginRoles)) {
     patch.instructions = role.instructions
@@ -67,12 +68,11 @@ export function changeRole(agent: Agent, title: string, pluginRoles: RoleTemplat
   return patch
 }
 
-/** The current role's defaults, when the member's instructions differ from them; null otherwise. */
+/** The current role's default instructions, when the member's differ from them; null otherwise. Tools are left alone. */
 export function roleDefaults(agent: Agent, pluginRoles: RoleTemplate[] = []): Partial<Agent> | null {
-  const r = roleByTitle(agent.title)
-  const role = r ?? pluginRoles.find((x) => same(x.title, agent.title))
+  const role = roleByTitle(agent.title) ?? pluginRoles.find((x) => same(x.title, agent.title))
   if (!role || agent.instructions.trim() === role.instructions.trim()) return null
-  return r ? { instructions: r.instructions, tools: [...r.tools] } : { instructions: role.instructions }
+  return { instructions: role.instructions }
 }
 
 export const uid = () => crypto.randomUUID().slice(0, 8)

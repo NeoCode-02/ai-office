@@ -22,7 +22,7 @@ describe('parseUsd', () => {
   })
 
   it('rejects negative, non-numeric and exotic input', () => {
-    for (const s of ['-1', 'abc', '.', '1e3', 'Infinity', 'NaN', '1.2.3', '0x10']) expect(parseUsd(s), s).toBeNull()
+    for (const s of ['-1', 'abc', '.', '1e3', 'Infinity', 'NaN', '1.2.3', '0x10', '1,000', '1,000.50', '1.000,5']) expect(parseUsd(s), s).toBeNull()
   })
 })
 

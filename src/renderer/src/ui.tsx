@@ -310,7 +310,8 @@ export function Switch({ on, onChange, label }: { on: boolean; onChange(v: boole
 }
 
 /** Destructive action that needs a second click within 3 s. */
-export function ConfirmButton({ onConfirm, children, className = '' }: { onConfirm(): void; children: ReactNode; className?: string }) {
+/** `label` names what is deleted ("Delete Aziz"), for screen readers; the armed state is announced. */
+export function ConfirmButton({ onConfirm, children, className = '', label }: { onConfirm(): void; children: ReactNode; className?: string; label?: string }) {
   const t = useT()
   const [armed, setArmed] = useState(false)
   useEffect(() => {
@@ -319,7 +320,13 @@ export function ConfirmButton({ onConfirm, children, className = '' }: { onConfi
     return () => clearTimeout(id)
   }, [armed])
   return (
-    <button type="button" className={`btn danger ${armed ? 'armed' : ''} ${className}`} onClick={() => (armed ? onConfirm() : setArmed(true))}>
+    <button
+      type="button"
+      className={`btn danger ${armed ? 'armed' : ''} ${className}`}
+      aria-label={armed ? t.common.confirmDelete : label}
+      aria-live="polite"
+      onClick={() => (armed ? onConfirm() : setArmed(true))}
+    >
       <Icon name="trash" size={14} />
       {armed ? t.common.confirmDelete : children}
     </button>

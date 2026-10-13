@@ -8,7 +8,10 @@ export function errCode(e: unknown): string | null {
 
 /** A dollar amount typed by the owner: empty = 0, comma decimals allowed; null when invalid. */
 export function parseUsd(s: string): number | null {
-  const v = s.trim().replace(',', '.')
+  const raw = s.trim()
+  // "1,000" could be a thousand or one: refuse it instead of guessing. A comma works as a decimal point otherwise.
+  if (/,\d{3}$/.test(raw) || (raw.match(/[.,]/g)?.length ?? 0) > 1) return null
+  const v = raw.replace(',', '.')
   if (v === '') return 0
   if (!/^\d*\.?\d*$/.test(v) || v === '.') return null
   const n = Number(v)

@@ -13,6 +13,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
   const [newSkill, setNewSkill] = useState(false)
   const [testing, setTesting] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [failed, setFailed] = useState('')
 
   const [tick, setTick] = useState(0)
   const reload = () => setTick((n) => n + 1)
@@ -25,13 +26,14 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
         setSkills(s)
         setPlugins(p)
         setLoaded(true)
+        setFailed('')
       },
-      (e) => live && notify(errText(e))
+      (e) => live && setFailed(errText(e))
     )
     return () => {
       live = false
     }
-  }, [tick, notify])
+  }, [tick])
 
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     try {
@@ -72,6 +74,15 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
         </div>
       </div>
 
+      {failed && (
+        <div className="note danger row" role="alert" style={{ marginBottom: 16 }}>
+          <span className="spacer">{failed}</span>
+          <button type="button" className="btn sm" onClick={reload}>
+            {t.shell.retry}
+          </button>
+        </div>
+      )}
+
       <div className="panel panel-pad row" style={{ alignItems: 'flex-start' }}>
         <Icon name="check" size={18} />
         <div>
@@ -91,7 +102,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
           </button>
         </div>
         <div className="list">
-          {mcp.length === 0 && <div className="list-empty">{loaded ? t.ext.noneMcp : t.shell.loading}</div>}
+          {mcp.length === 0 && <div className="list-empty">{loaded ? t.ext.noneMcp : failed ? '—' : t.shell.loading}</div>}
           {mcp.map((m) => (
             <div key={m.id} className="list-row">
               <Icon name="plug" />
@@ -130,7 +141,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
           </div>
         </div>
         <div className="list">
-          {skills.length === 0 && <div className="list-empty">{loaded ? t.ext.noneSkills : t.shell.loading}</div>}
+          {skills.length === 0 && <div className="list-empty">{loaded ? t.ext.noneSkills : failed ? '—' : t.shell.loading}</div>}
           {skills.map((s) => (
             <div key={s.name} className="list-row">
               <Icon name="book" />
@@ -142,7 +153,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
                 <div className="muted small ellipsis" title={s.description}>{s.description}</div>
               </div>
               {s.source === 'user' && (
-                <ConfirmButton className="sm" onConfirm={() => run(() => window.office.deleteSkill(s.name))}>
+                <ConfirmButton className="sm" label={`${t.common.delete} ${s.name}`} onConfirm={() => run(() => window.office.deleteSkill(s.name))}>
                   {t.common.delete}
                 </ConfirmButton>
               )}
@@ -163,7 +174,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
           </button>
         </div>
         <div className="list">
-          {plugins.length === 0 && <div className="list-empty">{loaded ? t.ext.nonePlugins : t.shell.loading}</div>}
+          {plugins.length === 0 && <div className="list-empty">{loaded ? t.ext.nonePlugins : failed ? '—' : t.shell.loading}</div>}
           {plugins.map((p) => (
             <div key={p.name} className="list-row">
               <Icon name="puzzle" />
@@ -177,7 +188,9 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
                 </div>
                 {p.ignored.length > 0 && <div className="faint small">{t.ext.ignored(p.ignored.join(', '))}</div>}
               </div>
-              <ConfirmButton className="sm" onConfirm={() => run(() => window.office.deletePlugin(p.name))}>{t.common.delete}</ConfirmButton>
+              <ConfirmButton className="sm" label={`${t.common.delete} ${p.name}`} onConfirm={() => run(() => window.office.deletePlugin(p.name))}>
+                {t.common.delete}
+              </ConfirmButton>
               <Switch on={p.enabled} label={p.name} onChange={(on) => run(() => window.office.setPluginEnabled(p.name, on))} />
             </div>
           ))}

@@ -216,7 +216,8 @@ export default function Team({ project, providers, live, onSave, notify }: Props
     draggable: canDrag(agents, a.id),
     onDragStart: (e: DragEvent) => {
       e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/plain', a.name)
+      // A private type: dropping a member on a text field elsewhere inserts nothing.
+      e.dataTransfer.setData('application/x-ai-office-member', a.id)
       setDrag(a.id)
     },
     onDragEnd: endDrag,

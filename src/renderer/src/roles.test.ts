@@ -10,7 +10,8 @@ const plugin: RoleTemplate = { title: 'Data Scientist', description: '', instruc
 describe('changing the role field', () => {
   it('brings the new role\'s instructions, tools and department when nothing was customised', () => {
     const a = newAgent('A', R('Software Engineer'), 'x')
-    expect(changeRole(a, 'copywriter')).toEqual({ title: 'Copywriter', department: 'Marketing', instructions: R('Copywriter').instructions, tools: R('Copywriter').tools })
+    // The title stays as typed (no recasing mid-word); the role's defaults still come along.
+    expect(changeRole(a, 'copywriter')).toEqual({ title: 'copywriter', department: 'Marketing', instructions: R('Copywriter').instructions, tools: R('Copywriter').tools })
     expect(changeRole({ ...a, instructions: '  ' }, 'CTO').instructions).toBe(R('CTO').instructions)
   })
 
@@ -31,7 +32,7 @@ describe('changing the role field', () => {
 
   it('uses plugin roles, treating their instructions as stock too', () => {
     const a = newAgent('A', R('Software Engineer'), 'x')
-    expect(changeRole(a, 'data scientist', [plugin])).toEqual({ title: 'Data Scientist', instructions: plugin.instructions })
+    expect(changeRole(a, 'data scientist', [plugin])).toEqual({ title: 'data scientist', instructions: plugin.instructions })
     const fromPlugin = { ...a, instructions: plugin.instructions }
     expect(changeRole(fromPlugin, 'QA Engineer', [plugin]).instructions).toBe(R('QA Engineer').instructions)
     expect(isStockInstructions(plugin.instructions)).toBe(false)
@@ -41,7 +42,8 @@ describe('changing the role field', () => {
   it('offers the role defaults only when the instructions differ from them', () => {
     const a = newAgent('A', R('QA Engineer'), 'x')
     expect(roleDefaults(a)).toBeNull()
-    expect(roleDefaults({ ...a, instructions: 'Mine', tools: [] })).toEqual({ instructions: R('QA Engineer').instructions, tools: R('QA Engineer').tools })
+    // The button says "instructions": the member's tools stay as the owner set them.
+    expect(roleDefaults({ ...a, instructions: 'Mine', tools: [] })).toEqual({ instructions: R('QA Engineer').instructions })
     expect(roleDefaults({ ...a, title: 'Data Scientist', instructions: 'Mine' }, [plugin])).toEqual({ instructions: plugin.instructions })
     expect(roleDefaults({ ...a, title: 'Unknown' })).toBeNull()
   })

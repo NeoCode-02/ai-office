@@ -151,7 +151,7 @@ function General({ notify }: { notify(t: string): void }) {
                 <p>{s.capsHint}</p>
               </div>
             </div>
-            <Caps key={`${settings.dailyCapUsd}/${settings.monthlyCapUsd}`} settings={settings} onSave={(dailyCapUsd, monthlyCapUsd) => save({ dailyCapUsd, monthlyCapUsd })} />
+            <Caps settings={settings} onSave={(dailyCapUsd, monthlyCapUsd) => save({ dailyCapUsd, monthlyCapUsd })} />
           </section>
 
           <section className="section">
@@ -181,7 +181,7 @@ function General({ notify }: { notify(t: string): void }) {
   )
 }
 
-/** Daily and monthly caps; remounted (via key) whenever the saved values change. */
+/** Daily and monthly caps. Not remounted on save, so typed values survive a failed save. */
 function Caps({ settings, onSave }: { settings: AppSettings; onSave(day: number, month: number): Promise<void> }) {
   const t = useT()
   const s = t.shell

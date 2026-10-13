@@ -489,7 +489,7 @@ function BlockedCard({ e, resolved, ctx }: { e: Ev<'blocked'>; resolved: boolean
                   </option>
                 ))}
               </select>
-              <ModelInput providerId={providerId} value={model} onChange={setModel} />
+              <ModelInput providerId={providerId} hasKey={providers.find((p) => p.id === providerId)?.hasKey} value={model} onChange={setModel} />
             </div>
             <div className="row">
               <button className="btn primary sm" disabled={busy || !model.trim()} onClick={() => go({ providerId, model: model.trim() })}>
