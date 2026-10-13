@@ -8,5 +8,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   hooks.configs.flat['recommended-latest'] ?? hooks.configs['recommended-latest'],
-  { languageOptions: { globals: { ...globals.browser, ...globals.node } } }
+  { languageOptions: { globals: { ...globals.browser, ...globals.node } } },
+  // `const { secret, ...rest } = x` is how we drop fields.
+  { rules: { '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }] } }
 )

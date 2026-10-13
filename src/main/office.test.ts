@@ -16,8 +16,6 @@ const agent = (id: string, reportsTo: string | null, extra: Partial<Agent> = {})
   instructions: '',
   providerId: 'p',
   model: 'm',
-  priceIn: 1,
-  priceOut: 1,
   tools: ['read_file', 'write_file', 'run_command'],
   ...extra
 })
@@ -31,6 +29,7 @@ function setup(agents: Agent[], scripts: Record<string, Script>, extra: Partial<
   const project: Project = { id: 'x', name: 'Acme', workspaceDir: dir, briefing: 'b', approval: 'auto', budgetUsd: 0, agents, ...extra }
   const office = new Office(project, {
     conn: () => ({ kind: 'openai', baseURL: '', apiKey: '' }),
+    charge: (_p, _m, u) => (u.in + u.out) / 1e6, // $1 per 1M tokens
     readNotes: () => '',
     appendNote: () => {},
     emit: (e) => events.push(e),

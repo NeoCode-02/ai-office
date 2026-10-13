@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import os from 'node:os'
-import { SYSTEM, USER, type Agent, type OfficeEvent, type Project, type ProviderKind, type ToolName, type Usage } from '../shared/types'
-import { cost } from './billing'
+import { SYSTEM, USER, type Agent, type OfficeEvent, type Project, type ToolName, type Usage } from '../shared/types'
 import type { McpToolbox } from './mcp'
 import { openChat, type Chat, type Conn, type ToolResult } from './providers'
 import { runTool, TOOL_DEFS } from './tools'
@@ -15,6 +14,8 @@ export interface SkillInfo {
 
 export interface OfficeDeps {
   conn(providerId: string): Conn
+  /** USD for a request, 0 on flat-fee accounts, null when the price is unknown. */
+  charge(providerId: string, model: string, usage: Usage): number | null
   readNotes(agentId: string): string
   appendNote(agentId: string, note: string): void
   emit(ev: OfficeEvent): void
@@ -91,7 +92,6 @@ ${notes.trim() ? `\n# Your notes from earlier work\n${notes.trim()}` : ''}`
 interface Member {
   agent: Agent
   chat?: Chat
-  kind?: ProviderKind
   mcp?: McpToolbox
   inbox: string[]
   open: ToolResult[]
@@ -214,10 +214,8 @@ export class Office {
         m.mcp = await this.deps.mcp(a.mcpServers)
         for (const err of m.mcp.errors) this.system(`${a.name}: MCP ${err}`)
       }
-      const conn = this.deps.conn(a.providerId)
-      m.kind = conn.kind
       m.chat = (this.deps.openChat ?? openChat)(
-        conn,
+        this.deps.conn(a.providerId),
         a.model,
         systemPrompt(this.project, a, this.deps.readNotes(a.id), skills),
         [...allowed.map((t) => TOOL_DEFS[t]), ...(m.mcp?.defs ?? [])]
@@ -324,8 +322,7 @@ export class Office {
 
   private charge(m: Member, usage: Usage) {
     const a = m.agent
-    const priced = a.priceIn > 0 || a.priceOut > 0
-    const usd = usage.usd ?? (priced ? cost({ in: a.priceIn, out: a.priceOut }, m.kind ?? 'openai', usage) : null)
+    const usd = this.deps.charge(a.providerId, a.model, usage)
     this.spent += usd ?? 0
     this.emit({ type: 'cost', agentId: a.id, usd, usage, at: Date.now() })
     if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) this.stop('budget', this.spent)

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Project, Provider } from '../../shared/types'
 import { useT } from './i18n'
-import { KNOWN_PRICES, TEMPLATES, uid } from './roles'
+import { TEMPLATES, uid } from './roles'
 import { ModelInput } from './Team'
 import { ConfirmButton, Empty, Field, Icon, Modal } from './ui'
 
@@ -123,8 +123,7 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
     if (!name.trim()) return setErr(t.office.errName)
     if (!dir.trim()) return setErr(t.office.errFolder)
     if (!providerId || !model.trim()) return setErr(t.office.errModel)
-    const [pin, pout] = KNOWN_PRICES[model.trim()] ?? [0, 0]
-    const agents = TEMPLATES[tpl].build(t.names, providerId, model.trim()).map((a) => ({ ...a, priceIn: pin, priceOut: pout }))
+    const agents = TEMPLATES[tpl].build(t.names, providerId, model.trim())
     onCreate({ id: uid(), name: name.trim(), workspaceDir: dir.trim(), briefing: '', approval: 'ask', budgetUsd: 5, agents })
   }
 

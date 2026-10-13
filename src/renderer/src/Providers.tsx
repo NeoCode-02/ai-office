@@ -138,7 +138,10 @@ function ProviderModal({ initial, onClose, onSaved }: { initial: Provider | null
     if (!initial && !key.trim() && !baseURL.includes('localhost')) return setErr(t.providers.errKey)
     setBusy(true)
     try {
-      await window.office.saveProvider({ id: initial?.id ?? uid(), name: name.trim(), kind, baseURL: baseURL.trim() }, key.trim())
+      await window.office.saveProvider(
+        { id: initial?.id ?? uid(), name: name.trim(), kind, baseURL: baseURL.trim(), billing: initial?.billing ?? { mode: 'payg' }, prices: initial?.prices ?? {} },
+        key.trim()
+      )
       onSaved()
     } catch (e) {
       setErr(errText(e, t))

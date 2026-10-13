@@ -4,16 +4,17 @@ import type { OfficeEvent } from '../shared/types'
 
 type Async<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<Awaited<R>> : never }
 
-const names: (keyof Api)[] = [
-  'appInfo', 'presets', 'listProviders', 'saveProvider', 'deleteProvider', 'listModels',
-  'listProjects', 'saveProject', 'deleteProject', 'pickFolder', 'openFolder',
-  'listSkills', 'setSkillEnabled', 'createSkill', 'importSkill', 'deleteSkill',
-  'listPlugins', 'importPlugin', 'setPluginEnabled', 'deletePlugin', 'pluginRoles',
-  'listMcp', 'saveMcp', 'deleteMcp', 'testMcp',
-  'listRuns', 'readRun', 'activeRun', 'start', 'post', 'stop', 'answer'
-]
+// Record (not an array) so TypeScript fails when a handler is missing here.
+const names: Record<keyof Api, true> = {
+  appInfo: true, presets: true, listProviders: true, saveProvider: true, deleteProvider: true, listModels: true, priceInfo: true, catalogPrices: true,
+  listProjects: true, saveProject: true, deleteProject: true, pickFolder: true, openFolder: true,
+  listSkills: true, setSkillEnabled: true, createSkill: true, importSkill: true, deleteSkill: true,
+  listPlugins: true, importPlugin: true, setPluginEnabled: true, deletePlugin: true, pluginRoles: true,
+  listMcp: true, saveMcp: true, deleteMcp: true, testMcp: true,
+  listRuns: true, readRun: true, activeRun: true, start: true, post: true, stop: true, answer: true
+}
 
-const api = Object.fromEntries(names.map((n) => [n, (...a: unknown[]) => ipcRenderer.invoke(n, ...a)])) as Async<Api>
+const api = Object.fromEntries(Object.keys(names).map((n) => [n, (...a: unknown[]) => ipcRenderer.invoke(n, ...a)])) as Async<Api>
 
 const bridge = {
   ...api,

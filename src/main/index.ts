@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { McpServer, OfficeEvent, Project, Provider } from '../shared/types'
+import type { McpServer, OfficeEvent, Price, Project, Provider } from '../shared/types'
+import { charge, fetchCatalog, matchCatalog, priceOf } from './billing'
 import { createExtensions } from './extensions'
 import { McpClient, McpPool } from './mcp'
 import { Office } from './office'
@@ -17,6 +18,7 @@ const cipher = {
   decrypt: (s: string) => safeStorage.decryptString(Buffer.from(s, 'base64'))
 }
 const store = createStore(dataDir, cipher)
+store.migrate()
 const ext = createExtensions(dataDir, cipher)
 
 const offices = new Map<string, { office: Office; pool: McpPool }>()
@@ -78,6 +80,23 @@ const handlers = {
   saveProvider: (p: Omit<Provider, 'hasKey'>, key: string) => store.saveProvider(p, key),
   deleteProvider: (id: string) => store.deleteProvider(id),
   listModels: (id: string) => listModels(store.conn(id)),
+  /** Effective price per model and where it comes from. */
+  priceInfo: (id: string, models: string[]) => {
+    const p = store.provider(id)
+    return Object.fromEntries(
+      models.map((m) => [m, { price: p && priceOf(p, m), source: !p ? 'none' : p.prices[m] ? 'own' : priceOf(p, m) ? 'builtin' : 'none' }])
+    ) as Record<string, { price?: Price; source: 'own' | 'builtin' | 'none' }>
+  },
+  /** Prices from OpenRouter's public catalog for the models it can match unambiguously. */
+  catalogPrices: async (p: Pick<Provider, 'kind' | 'baseURL'>, models: string[]) => {
+    const list = await fetchCatalog()
+    const out: Record<string, Price> = {}
+    for (const m of models) {
+      const price = matchCatalog(list, p, m)
+      if (price) out[m] = price
+    }
+    return out
+  },
 
   listProjects: () => store.listProjects(),
   saveProject: (p: Project) => store.saveProject(p),
@@ -128,6 +147,10 @@ const handlers = {
     const pool = new McpPool((id) => ext.mcpConfig(id))
     const office = new Office(p, {
       conn: (id) => store.conn(id),
+      charge: (id, model, usage) => {
+        const prov = store.provider(id)
+        return prov ? charge(prov, model, usage) : null
+      },
       readNotes: (agentId) => store.readNotes(projectId, agentId),
       appendNote: (agentId, note) => store.appendNote(projectId, agentId, note),
       emit: (ev) => emit(projectId, runId, ev),

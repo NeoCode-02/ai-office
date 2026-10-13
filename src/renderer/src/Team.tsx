@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Agent, McpServer, Project, Provider, RoleTemplate, ToolName } from '../../shared/types'
 import { errText, useT } from './i18n'
-import { KNOWN_PRICES, newAgent, roleByTitle, ROLES, uid } from './roles'
+import { newAgent, roleByTitle, ROLES, uid } from './roles'
 import { Avatar, ConfirmButton, Empty, Field, Icon, Sheet } from './ui'
 
 const EDITABLE: ToolName[] = ['list_files', 'read_file', 'search_files', 'write_file', 'edit_file', 'run_command', 'web_fetch']
@@ -65,7 +65,7 @@ export default function Team({ project, providers, onSave, notify }: Props) {
     const used = new Set(agents.map((a) => a.name))
     const name = t.names.find((n) => !used.has(n)) ?? `${t.names[0]} ${agents.length + 1}`
     const a = newAgent(name, role, boss?.id ?? null, base?.providerId, base?.model)
-    Object.assign(a, { priceIn: base?.priceIn ?? 0, priceOut: base?.priceOut ?? 0, department: boss?.department || a.department })
+    a.department = boss?.department || a.department
     setAgents((all) => [...all, a])
     setSel(a.id)
   }
@@ -237,10 +237,7 @@ export default function Team({ project, providers, onSave, notify }: Props) {
                 <ModelInput
                   providerId={agent.providerId}
                   value={agent.model}
-                  onChange={(m) => {
-                    const price = KNOWN_PRICES[m]
-                    update(price ? { model: m, priceIn: price[0], priceOut: price[1] } : { model: m })
-                  }}
+                  onChange={(m) => update({ model: m })}
                 />
               </Field>
             </div>
@@ -250,15 +247,6 @@ export default function Team({ project, providers, onSave, notify }: Props) {
             <details className="more">
               <summary><Icon name="chevron" size={12} /> {t.team.advanced}</summary>
               <div className="stack">
-                <div className="grid2">
-                  <Field label={t.team.priceIn}>
-                    <input className="input num" type="number" min={0} step={0.01} value={agent.priceIn} onChange={(e) => update({ priceIn: Math.max(0, Number(e.target.value)) })} />
-                  </Field>
-                  <Field label={t.team.priceOut}>
-                    <input className="input num" type="number" min={0} step={0.01} value={agent.priceOut} onChange={(e) => update({ priceOut: Math.max(0, Number(e.target.value)) })} />
-                  </Field>
-                </div>
-                {!agent.priceIn && !agent.priceOut && <div className="note">{t.team.noPrice}</div>}
 
                 <Field label={t.team.tools} hint={t.team.toolsHint}>
                   <div className="checks">

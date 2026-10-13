@@ -41,7 +41,7 @@ export const roleByTitle = (t: string) => ROLES.find((r) => r.title.toLowerCase(
 export const uid = () => crypto.randomUUID().slice(0, 8)
 
 export function newAgent(name: string, role: Role, reportsTo: string | null, providerId = '', model = ''): Agent {
-  return { id: uid(), name, title: role.title, department: role.department, reportsTo, instructions: role.instructions, providerId, model, priceIn: 0, priceOut: 0, tools: [...role.tools] }
+  return { id: uid(), name, title: role.title, department: role.department, reportsTo, instructions: role.instructions, providerId, model, tools: [...role.tools] }
 }
 
 const R = (t: string) => roleByTitle(t)!
@@ -79,11 +79,3 @@ export const TEMPLATES: TeamTemplate[] = [
   },
   { id: 'blank', build: (n, p, m) => [newAgent(n[0], R('CEO'), null, p, m)] }
 ]
-
-/** Known list prices (USD / 1M tokens). Anything else: user enters it. */
-export const KNOWN_PRICES: Record<string, [number, number]> = {
-  'claude-fable-5-1': [10, 50],
-  'claude-opus-5-5': [4, 20],
-  'claude-sonnet-5-5': [2, 10],
-  'claude-haiku-5-5': [0.1, 0.5]
-}

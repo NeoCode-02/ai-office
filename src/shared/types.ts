@@ -1,5 +1,16 @@
 export type ProviderKind = 'openai' | 'anthropic'
 
+/**
+ * How the account is paid. payg = per token (needs prices), subscription = flat fee,
+ * free = local or free tier. `quota` is the user's own limit, tracked from this app's usage.
+ */
+export interface Billing {
+  mode: 'payg' | 'subscription' | 'free'
+  /** Subscription fee, USD per month. */
+  fee?: number
+  quota?: { amount: number; unit: 'usd' | 'requests' | 'tokens'; window: '5h' | 'day' | 'week' | 'month' }
+}
+
 /** Renderer never sees the key itself, only whether one is stored. */
 export interface Provider {
   id: string
@@ -7,6 +18,9 @@ export interface Provider {
   kind: ProviderKind
   baseURL: string
   hasKey: boolean
+  billing: Billing
+  /** Model id → price. Built-in prices fill in for Anthropic's own API. */
+  prices: Record<string, Price>
 }
 
 /** Tokens of one model request. `in` is the uncached part of the prompt. */
@@ -53,9 +67,8 @@ export interface Agent {
   instructions: string
   providerId: string
   model: string
-  /** USD per 1M tokens */
-  priceIn: number
-  priceOut: number
+  /** Used for the rest of a run when the main model fails (no credit, bad key, model gone). */
+  backup?: { providerId: string; model: string }
   tools: ToolName[]
   /** MCP server ids this agent may use. */
   mcpServers?: string[]
