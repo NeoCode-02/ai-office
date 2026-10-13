@@ -2,7 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } 
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { SYSTEM, type McpServer, type ModelRef, type OfficeEvent, type Price, type Project, type Provider } from '../shared/types'
+import type { Api } from '../shared/api'
+import { DEFAULT_SETTINGS, SYSTEM, type AppSettings, type McpServer, type ModelRef, type OfficeEvent, type Price, type Project, type Provider } from '../shared/types'
 import { balance } from './balance'
 import { charge, fetchCatalog, matchCatalog, priceOf } from './billing'
 import { quotaUse, stats, windowStart } from './stats'
@@ -80,9 +81,17 @@ function emit(projectId: string, runId: string, ev: OfficeEvent) {
   win?.webContents.send('office:event', projectId, runId, ev)
 }
 
-const handlers = {
+// Contract stub: replaced when the feature lands.
+const todo = (): never => {
+  throw new Error('E_NOT_IMPLEMENTED')
+}
+
+const handlers: Api = {
   appInfo: () => ({ version: app.getVersion(), platform: process.platform }),
   presets: () => PRESETS,
+  getSettings: (): AppSettings => DEFAULT_SETTINGS,
+  saveSettings: () => todo(),
+  checkUpdate: async () => todo(),
   listProviders: () => store.listProviders(),
   saveProvider: (p: Omit<Provider, 'hasKey'>, key: string) => store.saveProvider(p, key),
   deleteProvider: (id: string) => store.deleteProvider(id),
@@ -109,7 +118,8 @@ const handlers = {
     const records = store.readUsage(windowFrom, Math.max(to, now + 1))
     return {
       stats: stats(records, from, to, projectId),
-      quotas: Object.fromEntries(providers.map((p) => [p.id, quotaUse(records, p.id, p.billing, now)]))
+      quotas: Object.fromEntries(providers.map((p) => [p.id, quotaUse(records, p.id, p.billing, now)])),
+      caps: { day: 0, month: 0, dailyCapUsd: 0, monthlyCapUsd: 0 }
     }
   },
   balance: (id: string) => balance(store.conn(id)),
@@ -121,11 +131,15 @@ const handlers = {
     offices.delete(id)
     store.deleteProject(id)
   },
+  exportProject: async () => todo(),
+  importProject: async () => todo(),
   pickFolder: async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : r.filePaths[0]
   },
-  openFolder: (dir: string) => shell.openPath(dir),
+  openWorkspace: async (projectId: string) => {
+    await shell.openPath(project(projectId).workspaceDir)
+  },
 
   listSkills: () => ext.listSkills(),
   setSkillEnabled: (name: string, on: boolean) => ext.setSkillEnabled(name, on),
@@ -153,9 +167,11 @@ const handlers = {
 
   listRuns: (projectId: string) => store.listRuns(projectId),
   readRun: (projectId: string, runId: string) => store.readRun(projectId, runId),
+  deleteRun: () => todo(),
+  exportRun: async () => todo(),
   activeRun: (projectId: string) => offices.get(projectId)?.office.runId ?? null,
 
-  start(projectId: string, goal: string) {
+  async start(projectId: string, goal: string) {
     offices.get(projectId)?.office.stop('new_task')
     const p = project(projectId)
     if (!p.workspaceDir || !fs.statSync(p.workspaceDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error('E_NO_WORKSPACE')
@@ -195,9 +211,13 @@ const handlers = {
   },
   stop: (projectId: string) => offices.get(projectId)?.office.stop(),
   retryAgent: (projectId: string, agentId: string, model?: ModelRef) => offices.get(projectId)?.office.retry(agentId, model),
-  answer: (projectId: string, approvalId: string, ok: boolean) => offices.get(projectId)?.office.answer(approvalId, ok)
+  answer: (projectId: string, approvalId: string, ok: boolean) => offices.get(projectId)?.office.answer(approvalId, ok),
+  answerPlan: () => todo(),
+  runChanges: async () => todo(),
+  fileDiff: async () => todo(),
+  revertRun: async () => todo(),
+  commitWorkspace: async () => todo()
 }
-export type Api = typeof handlers
 
 for (const [name, fn] of Object.entries(handlers)) {
   ipcMain.handle(name, (_e, ...args: unknown[]) => (fn as (...a: unknown[]) => unknown)(...args))

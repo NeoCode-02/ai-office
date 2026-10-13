@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Agent, McpServer, Price, Project, Provider, RoleTemplate, ToolName } from '../../shared/types'
+import type { Live } from './App'
 import { errText, useT } from './i18n'
 import { newAgent, roleByTitle, ROLES, uid } from './roles'
 import { isOpenRouter, num } from './Pricing'
@@ -53,6 +54,8 @@ function PriceLine({ provider, model }: { provider?: Provider; model: string }) 
 interface Props {
   project: Project
   providers: Provider[]
+  /** The office's current work, for live status on the chart. */
+  live?: Live
   onSave(p: Project): Promise<void>
   notify(t: string): void
 }

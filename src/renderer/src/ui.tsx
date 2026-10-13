@@ -35,7 +35,19 @@ const PATHS = {
   refresh: 'M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5',
   chart: 'M5 20v-8M11 20V5M17 20v-5M3 20h18',
   crown: 'M3 7l4 4 5-7 5 7 4-4-2 12H5Z',
-  download: 'M12 3v12M7 10l5 5 5-5M5 21h14'
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
+  upload: 'M12 21V9M7 14l5-5 5 5M5 3h14',
+  undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
+  branch: 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 9a9 9 0 0 1-9 9',
+  diff: 'M12 3v10M7 8h10M7 21h10',
+  bell: 'M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0',
+  sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
+  monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z',
+  clipboard: 'M9 4h6v3H9zM9 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-3M9 12h6M9 16h4',
+  grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
+  more: 'M5 12h.01M12 12h.01M19 12h.01'
 } as const
 export type IconName = keyof typeof PATHS
 
@@ -170,61 +182,6 @@ export function Empty({ icon, title, body, children }: { icon: IconName; title: 
       {body && <p>{body}</p>}
       {children && <div className="row" style={{ marginTop: 8 }}>{children}</div>}
     </div>
-  )
-}
-
-/** Minimal markdown → React (no innerHTML): code blocks, inline code, bold, headings, lists. */
-export function Markdown({ text }: { text: string }) {
-  const out: ReactNode[] = []
-  text.split(/```[^\n]*\n?/).forEach((part, i) => {
-    if (i % 2 === 1) {
-      out.push(<pre key={i}><code>{part.replace(/\n$/, '')}</code></pre>)
-      return
-    }
-    let list: { ordered: boolean; items: string[] } | null = null
-    const flush = (k: string) => {
-      if (!list) return
-      const items = list.items.map((t, j) => <li key={j}>{inline(t)}</li>)
-      out.push(list.ordered ? <ol key={k}>{items}</ol> : <ul key={k}>{items}</ul>)
-      list = null
-    }
-    part.split(/\n{2,}|\n(?=\s*(?:[-*•]|\d+\.)\s)|\n(?=#{1,4}\s)/).forEach((block, j) => {
-      const k = `${i}-${j}`
-      const b = block.trim()
-      if (!b) return
-      const li = /^\s*(?:([-*•])|(\d+)\.)\s+([\s\S]*)$/.exec(b)
-      if (li) {
-        const ordered = Boolean(li[2])
-        if (list && list.ordered !== ordered) flush(k + 'f')
-        list ??= { ordered, items: [] }
-        list.items.push(li[3])
-        return
-      }
-      flush(k + 'f')
-      // A heading may be followed by text on the next line in the same block.
-      const h = /^#{1,4}\s+(.*)(?:\n([\s\S]*))?$/.exec(b)
-      if (!h) return void out.push(<p key={k}>{lines(b)}</p>)
-      out.push(<h4 key={k}>{inline(h[1])}</h4>)
-      if (h[2]?.trim()) out.push(<p key={`${k}p`}>{lines(h[2].trim())}</p>)
-    })
-    flush(`${i}-end`)
-  })
-  return <div className="md">{out}</div>
-}
-
-function lines(s: string) {
-  return s.split('\n').flatMap((l, i) => (i ? [<br key={`b${i}`} />, ...inline(l)] : inline(l)))
-}
-
-function inline(s: string): ReactNode[] {
-  return s.split(/(`[^`]+`|\*\*[^*]+\*\*)/).map((t, i) =>
-    t.startsWith('`') && t.endsWith('`') && t.length > 1 ? (
-      <code key={i}>{t.slice(1, -1)}</code>
-    ) : t.startsWith('**') && t.endsWith('**') && t.length > 3 ? (
-      <strong key={i}>{t.slice(2, -2)}</strong>
-    ) : (
-      t
-    )
   )
 }
 

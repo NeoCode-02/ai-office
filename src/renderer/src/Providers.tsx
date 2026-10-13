@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Preset } from '../../main/providers'
+import type { Preset } from '../../shared/types'
 import type { Billing, Provider } from '../../shared/types'
 import { errText, useT } from './i18n'
 import { uid } from './roles'

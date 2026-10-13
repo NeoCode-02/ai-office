@@ -3,7 +3,8 @@ import { SYSTEM, USER, type Agent, type AgentStatus, type ModelRef, type OfficeE
 import type { Live } from './App'
 import { errText, useT } from './i18n'
 import { ModelInput } from './Team'
-import { Avatar, baseName, clock, dateTime, Empty, Icon, Markdown, Modal, Sheet, tokens, usd, type IconName } from './ui'
+import { Markdown } from './markdown'
+import { Avatar, baseName, clock, dateTime, Empty, Icon, Modal, Sheet, tokens, usd, type IconName } from './ui'
 
 const TOOL_ICON: Record<string, IconName> = {
   list_files: 'folder',
@@ -502,7 +503,7 @@ function FeedItem({ item, byId, nameOf, project, providers, active, onSave }: {
               >
                 <Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? t.common.copied : t.common.copy}
               </button>
-              <button className="btn quiet sm" onClick={() => window.office.openFolder(project.workspaceDir)}>
+              <button className="btn quiet sm" onClick={() => window.office.openWorkspace(project.id)}>
                 <Icon name="folder" size={13} /> {t.work.openFolder}
               </button>
             </div>
