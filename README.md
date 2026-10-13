@@ -12,6 +12,7 @@
 <p align="center">
   <a href="README.uz.md">O‘zbekcha</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="#costs-and-limits">Costs and limits</a> ·
   <a href="#extending">Extending</a> ·
   <a href="#security">Security</a>
 </p>
@@ -63,6 +64,19 @@ You ──goal──▶ CEO ──task──▶ Department head ──task──
 - Work stops when the CEO delivers the final report, the budget runs out, or you press Stop. Write again to continue.
 
 Only two adapters are needed: the official `openai` SDK for every OpenAI-compatible API and the official `@anthropic-ai/sdk` for Claude.
+
+## Costs and limits
+
+Every request is logged with the tokens the provider reported, and **Usage** shows spend per day, per model and per team member.
+
+- **How you pay is set per provider:** pay per token (with model prices), a subscription (flat monthly fee, optional plan limit such as "120 requests per 5 hours"), or free (local models).
+- **Prices are per model, per provider.** Claude prices are built in; for other models type them in or fill them from OpenRouter's public catalog (only exact matches are filled). Cache reads and writes are priced separately. A model without a price shows as *unknown*, never as $0.
+- **Remaining balance** comes straight from the provider where its API offers it (DeepSeek, Kimi, OpenRouter key limit). Elsewhere you can set your own monthly or plan limit, tracked from this app's usage.
+- **When a model fails:** rate limits and provider outages are retried automatically (up to six times, honouring `retry-after`). If credit runs out, the key is rejected or the model is gone, the member switches to its **backup model** with a log of its work so far. Without a backup the member stops and asks you to retry or pick another model; the rest of the run waits.
+
+![Usage](docs/usage.png)
+
+![A member that ran out of credit](docs/limits.png)
 
 ## Extending
 

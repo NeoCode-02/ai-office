@@ -40,6 +40,17 @@ Yoki [Releases](https://github.com/NeoCode-02/ai-office/releases) sahifasidan o�
 2. **Yangi ofis** — ish papkasi va jamoa shablonini tanlang.
 3. **Ish** — bosh rahbarga nima kerakligini yozing. So‘ralganda buyruqlarga ruxsat bering. Yakuniy hisobotni o‘qing.
 
+## Xarajat va limitlar
+
+Har bir so‘rov provayder qaytargan tokenlar bilan yoziladi. **Statistika** sahifasida kunlik, model va xodim kesimidagi xarajat ko‘rinadi.
+
+- **To‘lov turi har bir provayderda alohida:** token uchun (model narxlari bilan), obuna (oylik qat’iy to‘lov va ixtiyoriy tarif limiti, masalan "5 soatda 120 so‘rov") yoki bepul (lokal modellar).
+- **Narx provayder ichida har bir model uchun.** Claude narxlari ichida tayyor. Boshqa modellar uchun narxni qo‘lda kiritasiz yoki OpenRouter ochiq katalogidan to‘ldirasiz (faqat aniq moslik bo‘lsa). Keshdan o‘qish va keshga yozish alohida hisoblanadi. Narxi yo‘q model $0 emas, *noma’lum* deb ko‘rsatiladi.
+- **Qolgan balans** provayder API orqali bersa, to‘g‘ridan-to‘g‘ri olinadi (DeepSeek, Kimi, OpenRouter kalit limiti). Qolganlarida oylik yoki tarif limitingizni kiritasiz va u shu ilovadagi ishlatish bo‘yicha kuzatiladi.
+- **Model ishlamay qolsa:** so‘rovlar limiti va provayder nosozligida avtomatik qayta urinadi (6 martagacha, `retry-after` bo‘yicha). Balans tugasa, kalit rad etilsa yoki model topilmasa, xodim qilgan ishi jurnali bilan **zaxira modelga** o‘tadi. Zaxira bo‘lmasa xodim to‘xtaydi va sizdan qayta urinish yoki boshqa model tanlashni so‘raydi; run ochiq qoladi.
+
+![Statistika](docs/usage.png)
+
 ## Kengaytmalar
 
 Hammasi kengaytmasiz ishlaydi. Kerak bo‘lsa **Sozlamalar → Kengaytmalar**:
