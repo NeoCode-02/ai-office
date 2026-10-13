@@ -108,7 +108,7 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
       }
       // Refused or cut-off turns may hold a partial tool_use: never run it.
       if (msg.stop_reason === 'refusal' || msg.stop_reason === 'max_tokens') {
-        turn.text ||= msg.stop_reason === 'refusal' ? '(model so‘rovni rad etdi)' : '(javob uzunlik limitiga yetdi)'
+        turn.text ||= msg.stop_reason === 'refusal' ? '(the model declined this request)' : '(the reply hit the length limit)'
         orphans = msg.content.flatMap((b) => (b.type === 'tool_use' ? [b.id] : []))
         return turn
       }
@@ -135,7 +135,7 @@ function openaiChat(conn: Conn, model: string, system: string, tools: ToolDef[])
 
       const res = await client.chat.completions.create({ model, messages, tools: defs })
       const choice = res.choices[0]
-      if (!choice) throw new Error('Provayder bo‘sh javob qaytardi')
+      if (!choice) throw new Error('The provider returned an empty response')
       // Push as returned: keeps extra fields like DeepSeek's reasoning_content.
       messages.push(choice.message as OpenAI.Chat.ChatCompletionAssistantMessageParam)
 

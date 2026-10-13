@@ -101,7 +101,7 @@ describe('office', () => {
     })
     office.start('g')
     await finished()
-    expect(reply).toMatch(/berilmagan/)
+    expect(reply).toMatch(/not available/)
   })
 
   it('owner can continue a finished run', async () => {
@@ -123,7 +123,7 @@ describe('office', () => {
 describe('org + sandbox', () => {
   it('rejects two CEOs and cycles', () => {
     expect(validateOrg([agent('a', null), agent('b', null)])).toBeTruthy()
-    expect(validateOrg([agent('ceo', null), agent('a', 'b'), agent('b', 'a')])).toMatch(/aylana/)
+    expect(validateOrg([agent('ceo', null), agent('a', 'b'), agent('b', 'a')])).toBe('E_ORG_CYCLE|a')
     expect(validateOrg([agent('ceo', null), agent('a', 'ceo')])).toBeNull()
   })
 

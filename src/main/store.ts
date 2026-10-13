@@ -47,7 +47,7 @@ export function createStore(dir: string, cipher: Cipher) {
 
     conn(id: string): Conn {
       const p = providers().find((x) => x.id === id)
-      if (!p) throw new Error('Provayder topilmadi')
+      if (!p) throw new Error('E_NO_PROVIDER')
       return { kind: p.kind, baseURL: p.baseURL, apiKey: p.key ? cipher.decrypt(p.key) : '' }
     },
 

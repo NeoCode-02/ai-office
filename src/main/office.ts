@@ -1,36 +1,45 @@
 import { randomUUID } from 'node:crypto'
 import os from 'node:os'
 import { SYSTEM, USER, type Agent, type OfficeEvent, type Project, type ToolName } from '../shared/types'
+import type { McpToolbox } from './mcp'
 import { openChat, type Chat, type Conn, type ToolResult } from './providers'
 import { runTool, TOOL_DEFS } from './tools'
+
+export interface SkillInfo {
+  name: string
+  description: string
+  body: string
+  dir?: string
+}
 
 export interface OfficeDeps {
   conn(providerId: string): Conn
   readNotes(agentId: string): string
   appendNote(agentId: string, note: string): void
   emit(ev: OfficeEvent): void
+  skills?(): SkillInfo[]
+  mcp?(serverIds: string[]): Promise<McpToolbox>
   openChat?: typeof openChat
 }
 
 const MAX_STEPS = 40 // tool-loop steps per wake-up
 
-/** Checks the org chart: exactly one CEO, every manager exists, no cycles. */
+/** Checks the org chart. Returns an error code (`CODE` or `CODE|name`) or null. */
 export function validateOrg(agents: Agent[]): string | null {
-  if (agents.length === 0) return 'Jamoada hech kim yo‘q'
-  const ceos = agents.filter((a) => !a.reportsTo)
-  if (ceos.length !== 1) return 'Aynan bitta bosh rahbar (hech kimga hisobot bermaydigan) bo‘lishi kerak'
+  if (agents.length === 0) return 'E_ORG_EMPTY'
+  if (agents.filter((a) => !a.reportsTo).length !== 1) return 'E_ORG_CEO'
   const byId = new Map(agents.map((a) => [a.id, a]))
   const names = new Set<string>()
   for (const a of agents) {
     const key = a.name.trim().toLowerCase()
-    if (!key) return 'Har bir xodimga ism bering'
-    if (names.has(key)) return `"${a.name}" ismi takrorlangan`
+    if (!key) return 'E_ORG_NAME'
+    if (names.has(key)) return `E_ORG_DUP|${a.name}`
     names.add(key)
-    if (!a.model.trim() || !a.providerId) return `${a.name}: provayder va model tanlang`
+    if (!a.model.trim() || !a.providerId) return `E_ORG_MODEL|${a.name}`
     const seen = new Set<string>()
     for (let cur: Agent | undefined = a; cur?.reportsTo; cur = byId.get(cur.reportsTo)) {
-      if (!byId.has(cur.reportsTo)) return `${cur.name}: boshlig‘i topilmadi`
-      if (seen.has(cur.id)) return `${a.name}: hisobot zanjirida aylana bor`
+      if (!byId.has(cur.reportsTo)) return `E_ORG_BOSS|${cur.name}`
+      if (seen.has(cur.id)) return `E_ORG_CYCLE|${a.name}`
       seen.add(cur.id)
     }
   }
@@ -50,7 +59,7 @@ export function orgChart(agents: Agent[], me?: Agent): string {
   return lines.join('\n')
 }
 
-export function systemPrompt(p: Project, a: Agent, notes: string): string {
+export function systemPrompt(p: Project, a: Agent, notes: string, skills: SkillInfo[] = []): string {
   const boss = p.agents.find((x) => x.id === a.reportsTo)
   const reports = p.agents.filter((x) => x.reportsTo === a.id).map((x) => x.name)
   return `You are ${a.name}, ${a.title}${a.department ? ` in the ${a.department} department` : ''} at "${p.name}", a company staffed by AI colleagues. You are a full team member who owns your work, not a chat assistant.
@@ -72,7 +81,7 @@ ${boss ? '' : '- When the whole goal is done and verified, call `report_to_user`
 - Shared workspace: every file path is relative to it. OS: ${os.platform() === 'win32' ? 'Windows (run_command uses cmd.exe)' : os.platform()}.
 - Use \`remember\` for durable lessons about this company (conventions, decisions, pitfalls).
 - Reply in the language of the briefing and the goal.
-
+${skills.length ? `\n# Skills\nLoad a skill with \`use_skill\` before doing work it covers:\n${skills.map((s) => `- ${s.name}: ${s.description}`).join('\n')}\n` : ''}
 # Your role
 ${a.instructions.trim() || a.title}
 ${notes.trim() ? `\n# Your notes from earlier work\n${notes.trim()}` : ''}`
@@ -81,6 +90,7 @@ ${notes.trim() ? `\n# Your notes from earlier work\n${notes.trim()}` : ''}`
 interface Member {
   agent: Agent
   chat?: Chat
+  mcp?: McpToolbox
   inbox: string[]
   open: ToolResult[]
   busy: boolean
@@ -119,13 +129,13 @@ export class Office {
     this.deliver(to, `[From the owner] ${text}`)
   }
 
-  stop(reason = 'Egasi to‘xtatdi') {
+  stop(reason = 'owner_stopped', usd?: number) {
     if (!this.running) return
     for (const resolve of this.approvals.values()) resolve(false)
     this.approvals.clear()
     for (const m of this.members.values()) m.inbox = []
     this.running = false
-    this.emit({ type: 'run', runId: this.runId, state: 'stopped', reason, at: Date.now() })
+    this.emit({ type: 'run', runId: this.runId, state: 'stopped', reason, usd, at: Date.now() })
   }
 
   answer(approvalId: string, ok: boolean) {
@@ -136,6 +146,10 @@ export class Office {
 
   private emit(ev: OfficeEvent) {
     this.deps.emit(ev)
+  }
+
+  private system(text: string) {
+    this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: SYSTEM, to: [], text })
   }
 
   private setRunning(on: boolean, reason?: string) {
@@ -166,8 +180,7 @@ export class Office {
         await this.work(m, text)
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: SYSTEM, to: [], text: `${m.agent.name}: ${msg}` })
+      this.system(`${m.agent.name}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       m.busy = false
       this.emit({ type: 'status', agentId: m.agent.id, status: 'idle', at: Date.now() })
@@ -178,24 +191,34 @@ export class Office {
   private checkIdle() {
     if (!this.running) return
     for (const m of this.members.values()) if (m.busy || m.inbox.length) return
-    this.setRunning(false, 'Jamoa ishni tugatdi — yangi xabar yozsangiz davom etadi')
+    this.setRunning(false, 'idle')
   }
 
-  private tools(a: Agent): ToolName[] {
-    const extra: ToolName[] = a.reportsTo ? ['message', 'remember'] : ['message', 'remember', 'report_to_user']
-    return [...new Set([...a.tools.filter((t) => t !== 'report_to_user'), ...extra])]
+  private tools(a: Agent, hasSkills: boolean): ToolName[] {
+    const extra: ToolName[] = ['message', 'remember']
+    if (!a.reportsTo) extra.push('report_to_user')
+    if (hasSkills) extra.push('use_skill', 'read_skill_file')
+    const own = a.tools.filter((t) => !['report_to_user', 'use_skill', 'read_skill_file'].includes(t))
+    return [...new Set([...own, ...extra])]
   }
 
   /** One wake-up: model ↔ tools until it stops calling tools. */
   private async work(m: Member, text: string) {
     const a = m.agent
-    const allowed = this.tools(a)
-    m.chat ??= (this.deps.openChat ?? openChat)(
-      this.deps.conn(a.providerId),
-      a.model,
-      systemPrompt(this.project, a, this.deps.readNotes(a.id)),
-      allowed.map((t) => TOOL_DEFS[t])
-    )
+    const skills = this.deps.skills?.() ?? []
+    const allowed = this.tools(a, skills.length > 0)
+    if (!m.chat) {
+      if (a.mcpServers?.length && this.deps.mcp) {
+        m.mcp = await this.deps.mcp(a.mcpServers)
+        for (const err of m.mcp.errors) this.system(`${a.name}: MCP ${err}`)
+      }
+      m.chat = (this.deps.openChat ?? openChat)(
+        this.deps.conn(a.providerId),
+        a.model,
+        systemPrompt(this.project, a, this.deps.readNotes(a.id), skills),
+        [...allowed.map((t) => TOOL_DEFS[t]), ...(m.mcp?.defs ?? [])]
+      )
+    }
     let sent = false
     let results = m.open.splice(0)
     let input: string | undefined = text
@@ -215,19 +238,30 @@ export class Office {
           results.push({ id: call.id, content: 'Interrupted', isError: true })
           continue
         }
-        const r = await runTool(call, allowed, {
-          root: this.project.workspaceDir,
-          send: (to, body) => {
-            const err = this.send(a, to, body)
-            if (!err) sent = true
-            return err
-          },
-          remember: (note) => this.deps.appendNote(a.id, note),
-          report: (summary) => this.report(summary),
-          approve: (command) => this.approve(a, command)
-        })
+        let r: { content: string; isError: boolean }
+        let summary = summarize(call.input)
+        if (m.mcp?.has(call.name)) {
+          const label = m.mcp.label(call.name)
+          summary = label
+          r = (await this.approve(a, `${label} ${JSON.stringify(call.input)}`, 'mcp'))
+            ? await m.mcp.call(call.name, call.input).catch((e: Error) => ({ content: e.message, isError: true }))
+            : { content: 'The owner declined this tool call', isError: true }
+        } else {
+          r = await runTool(call, allowed, {
+            root: this.project.workspaceDir,
+            send: (to, body) => {
+              const err = this.send(a, to, body)
+              if (!err) sent = true
+              return err
+            },
+            remember: (note) => this.deps.appendNote(a.id, note),
+            report: (s) => this.report(s),
+            approve: (command) => this.approve(a, command, 'command'),
+            skill: (name) => skills.find((s) => s.name === name)
+          })
+        }
         if (call.name !== 'message' && call.name !== 'report_to_user') {
-          this.emit({ type: 'tool', id: randomUUID(), at: Date.now(), agentId: a.id, name: call.name, summary: summarize(call.input), ok: !r.isError })
+          this.emit({ type: 'tool', id: randomUUID(), at: Date.now(), agentId: a.id, name: call.name, summary, ok: !r.isError })
         }
         results.push({ id: call.id, content: r.content, isError: r.isError })
       }
@@ -242,16 +276,16 @@ export class Office {
   private send(from: Agent, to: string[], text: string): string {
     const ids: string[] = []
     for (const name of to) {
-      if (/^(owner|user|egasi)$/i.test(name.trim())) {
-        if (from.reportsTo) return 'Faqat bosh rahbar egaga yoza oladi; boshlig‘ingizga yozing'
+      if (/^(owner|user)$/i.test(name.trim())) {
+        if (from.reportsTo) return 'Only the top executive can message the owner; report to your manager instead'
         ids.push(USER)
         continue
       }
       const target = this.findByName(name)
-      if (!target) return `"${name}" degan xodim yo‘q. Mavjud: ${this.project.agents.map((x) => x.name).join(', ')}`
+      if (!target) return `No colleague named "${name}". Colleagues: ${this.project.agents.map((x) => x.name).join(', ')}`
       if (target.id !== from.id) ids.push(target.id)
     }
-    if (!ids.length) return 'Qabul qiluvchi yo‘q'
+    if (!ids.length) return 'No recipients'
     this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: from.id, to: ids, text })
     const names = ids.map((id) => (id === USER ? 'owner' : this.members.get(id)!.agent.name)).join(', ')
     for (const id of ids) {
@@ -268,13 +302,13 @@ export class Office {
   private report(summary: string) {
     this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: this.ceo.id, to: [USER], text: summary })
     for (const m of this.members.values()) m.inbox = []
-    this.setRunning(false, 'Yakuniy hisobot topshirildi')
+    this.setRunning(false, 'report')
   }
 
-  private approve(a: Agent, command: string): Promise<boolean> {
+  private approve(a: Agent, command: string, kind: 'command' | 'mcp'): Promise<boolean> {
     if (this.project.approval === 'auto') return Promise.resolve(true)
     const id = randomUUID()
-    this.emit({ type: 'approval', id, agentId: a.id, command, at: Date.now() })
+    this.emit({ type: 'approval', id, agentId: a.id, kind, command, at: Date.now() })
     this.emit({ type: 'status', agentId: a.id, status: 'waiting', at: Date.now() })
     return new Promise((resolve) =>
       this.approvals.set(id, (ok) => {
@@ -288,13 +322,11 @@ export class Office {
     const usd = (inTok * a.priceIn + outTok * a.priceOut) / 1e6
     this.spent += usd
     this.emit({ type: 'cost', agentId: a.id, usd, inTok, outTok, at: Date.now() })
-    if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) {
-      this.stop(`Byudjet tugadi ($${this.spent.toFixed(2)})`)
-    }
+    if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) this.stop('budget', this.spent)
   }
 }
 
 function summarize(input: Record<string, unknown>): string {
-  const v = input.command ?? input.path ?? input.note ?? input.summary ?? ''
+  const v = input.command ?? input.path ?? input.url ?? input.pattern ?? input.name ?? input.note ?? ''
   return String(v).slice(0, 200)
 }

@@ -5,8 +5,11 @@ import type { OfficeEvent } from '../shared/types'
 type Async<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<Awaited<R>> : never }
 
 const names: (keyof Api)[] = [
-  'presets', 'listProviders', 'saveProvider', 'deleteProvider', 'listModels',
+  'appInfo', 'presets', 'listProviders', 'saveProvider', 'deleteProvider', 'listModels',
   'listProjects', 'saveProject', 'deleteProject', 'pickFolder', 'openFolder',
+  'listSkills', 'setSkillEnabled', 'createSkill', 'importSkill', 'deleteSkill',
+  'listPlugins', 'importPlugin', 'setPluginEnabled', 'deletePlugin', 'pluginRoles',
+  'listMcp', 'saveMcp', 'deleteMcp', 'testMcp',
   'listRuns', 'readRun', 'activeRun', 'start', 'post', 'stop', 'answer'
 ]
 

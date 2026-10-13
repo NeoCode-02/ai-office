@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { OfficeEvent, Project, Provider } from '../shared/types'
+import type { McpServer, OfficeEvent, Project, Provider } from '../shared/types'
+import { createExtensions } from './extensions'
+import { McpClient, McpPool } from './mcp'
 import { Office } from './office'
 import { listModels, PRESETS } from './providers'
 import { createStore } from './store'
@@ -9,26 +11,31 @@ import { createStore } from './store'
 // Separate data folder for tests / portable use.
 if (process.env.AI_OFFICE_DATA) app.setPath('userData', process.env.AI_OFFICE_DATA)
 
-const store = createStore(path.join(app.getPath('userData'), 'data'), {
-  encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
-  decrypt: (s) => safeStorage.decryptString(Buffer.from(s, 'base64'))
-})
+const dataDir = path.join(app.getPath('userData'), 'data')
+const cipher = {
+  encrypt: (s: string) => safeStorage.encryptString(s).toString('base64'),
+  decrypt: (s: string) => safeStorage.decryptString(Buffer.from(s, 'base64'))
+}
+const store = createStore(dataDir, cipher)
+const ext = createExtensions(dataDir, cipher)
 
-const offices = new Map<string, Office>()
+const offices = new Map<string, { office: Office; pool: McpPool }>()
 let win: BrowserWindow | null = null
 
+const overlay = () => ({ color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#a1a4ab' : '#3f4148', height: 48 })
+
 function createWindow() {
-  const dark = nativeTheme.shouldUseDarkColors
   win = new BrowserWindow({
-    width: 1360,
+    width: 1320,
     height: 860,
-    minWidth: 980,
-    minHeight: 640,
+    minWidth: 960,
+    minHeight: 620,
     show: false,
     title: 'AI Office',
-    backgroundColor: dark ? '#0d0f14' : '#f6f7f9',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#111214' : '#f7f7f5',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: dark ? '#c9ced8' : '#3b4252', height: 44 },
+    titleBarOverlay: overlay(),
+    trafficLightPosition: { x: 16, y: 17 },
     webPreferences: { preload: path.join(__dirname, '../preload/index.js'), sandbox: true, contextIsolation: true }
   })
   win.once('ready-to-show', () => win?.show())
@@ -45,12 +52,12 @@ function createWindow() {
 }
 
 nativeTheme.on('updated', () => {
-  win?.setTitleBarOverlay({ color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#c9ced8' : '#3b4252', height: 44 })
+  if (process.platform !== 'darwin') win?.setTitleBarOverlay(overlay())
 })
 
 function project(id: string): Project {
   const p = store.listProjects().find((x) => x.id === id)
-  if (!p) throw new Error('Loyiha topilmadi')
+  if (!p) throw new Error('E_NO_PROJECT')
   return p
 }
 
@@ -59,11 +66,13 @@ function emit(projectId: string, runId: string, ev: OfficeEvent) {
   if (ev.type === 'run') {
     const run = store.listRuns(projectId).find((r) => r.id === runId)
     if (run) store.saveRun(projectId, { ...run, state: ev.state })
+    if (ev.state !== 'running') offices.get(projectId)?.pool.closeAll()
   }
   win?.webContents.send('office:event', projectId, runId, ev)
 }
 
 const handlers = {
+  appInfo: () => ({ version: app.getVersion(), platform: process.platform }),
   presets: () => PRESETS,
   listProviders: () => store.listProviders(),
   saveProvider: (p: Omit<Provider, 'hasKey'>, key: string) => store.saveProvider(p, key),
@@ -73,7 +82,7 @@ const handlers = {
   listProjects: () => store.listProjects(),
   saveProject: (p: Project) => store.saveProject(p),
   deleteProject: (id: string) => {
-    offices.get(id)?.stop()
+    offices.get(id)?.office.stop()
     offices.delete(id)
     store.deleteProject(id)
   },
@@ -83,36 +92,61 @@ const handlers = {
   },
   openFolder: (dir: string) => shell.openPath(dir),
 
+  listSkills: () => ext.listSkills(),
+  setSkillEnabled: (name: string, on: boolean) => ext.setSkillEnabled(name, on),
+  createSkill: (name: string, description: string, body: string) => ext.createSkill(name, description, body),
+  importSkill: (dir: string) => ext.importSkill(dir),
+  deleteSkill: (name: string) => ext.deleteSkill(name),
+  listPlugins: () => ext.listPlugins(),
+  importPlugin: (dir: string) => ext.importPlugin(dir),
+  setPluginEnabled: (name: string, on: boolean) => ext.setPluginEnabled(name, on),
+  deletePlugin: (name: string) => ext.deletePlugin(name),
+  pluginRoles: () => ext.pluginRoles(),
+  listMcp: () => ext.listMcp(),
+  saveMcp: (m: Omit<McpServer, 'hasSecrets' | 'plugin'>, secrets: string) => ext.saveMcp(m, secrets),
+  deleteMcp: (id: string) => ext.deleteMcp(id),
+  testMcp: async (id: string) => {
+    const cfg = ext.mcpConfig(id)
+    if (!cfg) throw new Error('E_MCP_DISABLED')
+    const c = await McpClient.connect(cfg)
+    try {
+      return (await c.listTools()).map((t) => t.name)
+    } finally {
+      c.close()
+    }
+  },
+
   listRuns: (projectId: string) => store.listRuns(projectId),
   readRun: (projectId: string, runId: string) => store.readRun(projectId, runId),
-  activeRun: (projectId: string) => offices.get(projectId)?.runId ?? null,
+  activeRun: (projectId: string) => offices.get(projectId)?.office.runId ?? null,
 
   start(projectId: string, goal: string) {
-    offices.get(projectId)?.stop('Yangi vazifa boshlandi')
+    offices.get(projectId)?.office.stop('new_task')
     const p = project(projectId)
-    if (!p.workspaceDir || !fs.statSync(p.workspaceDir, { throwIfNoEntry: false })?.isDirectory()) {
-      throw new Error('Ish papkasi topilmadi — sozlamalarda mavjud papkani tanlang')
-    }
+    if (!p.workspaceDir || !fs.statSync(p.workspaceDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error('E_NO_WORKSPACE')
     let runId = ''
+    const pool = new McpPool((id) => ext.mcpConfig(id))
     const office = new Office(p, {
       conn: (id) => store.conn(id),
       readNotes: (agentId) => store.readNotes(projectId, agentId),
       appendNote: (agentId, note) => store.appendNote(projectId, agentId, note),
-      emit: (ev) => emit(projectId, runId, ev)
+      emit: (ev) => emit(projectId, runId, ev),
+      skills: () => ext.enabledSkills(),
+      mcp: (ids) => pool.toolbox(ids)
     })
     runId = office.runId
-    offices.set(projectId, office)
+    offices.set(projectId, { office, pool })
     store.saveRun(projectId, { id: runId, goal, startedAt: Date.now(), state: 'running' })
     office.start(goal)
     return runId
   },
   post: (projectId: string, text: string, to?: string) => {
     const o = offices.get(projectId)
-    if (!o) throw new Error('Faol ish yo‘q')
-    o.post(text, to)
+    if (!o) throw new Error('E_NO_RUN')
+    o.office.post(text, to)
   },
-  stop: (projectId: string) => offices.get(projectId)?.stop(),
-  answer: (projectId: string, approvalId: string, ok: boolean) => offices.get(projectId)?.answer(approvalId, ok)
+  stop: (projectId: string) => offices.get(projectId)?.office.stop(),
+  answer: (projectId: string, approvalId: string, ok: boolean) => offices.get(projectId)?.office.answer(approvalId, ok)
 }
 export type Api = typeof handlers
 
@@ -121,4 +155,7 @@ for (const [name, fn] of Object.entries(handlers)) {
 }
 
 app.whenReady().then(createWindow)
-app.on('window-all-closed', () => app.quit())
+app.on('window-all-closed', () => {
+  for (const o of offices.values()) o.pool.closeAll()
+  app.quit()
+})
