@@ -5,6 +5,7 @@ import Prefs, { type PrefsTab } from './Prefs'
 import Settings, { NewProject } from './Settings'
 import Team from './Team'
 import { Icon, Mark, type IconName } from './ui'
+import Usage from './Usage'
 import Work from './Work'
 
 export interface Live {
@@ -20,6 +21,7 @@ export default function App() {
   const [sel, setSel] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('work')
   const [prefs, setPrefs] = useState<PrefsTab | null>(null)
+  const [usage, setUsage] = useState(false)
   const [live, setLive] = useState<Record<string, Live>>({})
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState('')
@@ -94,10 +96,11 @@ export default function App() {
           {projects.map((p) => (
             <button
               key={p.id}
-              className={`rail-item ${!prefs && sel === p.id ? 'on' : ''}`}
+              className={`rail-item ${!prefs && !usage && sel === p.id ? 'on' : ''}`}
               onClick={() => {
                 setSel(p.id)
                 setPrefs(null)
+                setUsage(false)
               }}
             >
               <span className="label">{p.name}</span>
@@ -107,7 +110,23 @@ export default function App() {
           {ready && !projects.length && <p className="rail-empty">{t.nav.noOffices}</p>}
         </div>
         <div className="rail-foot">
-          <button className={`rail-item ${prefs ? 'on' : ''}`} onClick={() => setPrefs('providers')}>
+          <button
+            className={`rail-item ${usage ? 'on' : ''}`}
+            onClick={() => {
+              setUsage(true)
+              setPrefs(null)
+            }}
+          >
+            <Icon name="chart" />
+            <span className="label">{t.nav.usage}</span>
+          </button>
+          <button
+            className={`rail-item ${prefs ? 'on' : ''}`}
+            onClick={() => {
+              setPrefs('providers')
+              setUsage(false)
+            }}
+          >
             <Icon name="sliders" />
             <span className="label">{t.nav.settings}</span>
           </button>
@@ -115,7 +134,23 @@ export default function App() {
       </nav>
 
       <main className="main">
-        {prefs ? (
+        {usage ? (
+          <>
+            <header className="topbar drag">
+              <h1>{t.nav.usage}</h1>
+            </header>
+            <div className="content">
+              <Usage
+                providers={providers}
+                projects={projects}
+                openProviders={() => {
+                  setUsage(false)
+                  setPrefs('providers')
+                }}
+              />
+            </div>
+          </>
+        ) : prefs ? (
           <>
             <header className="topbar drag">
               <h1>{t.prefs.title}</h1>
