@@ -1,7 +1,7 @@
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { describe, expect, it } from 'vitest'
-import { charge, cost, matchCatalog, priceOf, type CatalogModel } from './billing'
+import { BUILTIN, charge, cost, matchCatalog, priceOf, type CatalogModel } from './billing'
 import { openaiUsage, openChat } from './providers'
 
 const u = (inT: number, cacheRead: number, cacheWrite: number, out: number) => ({ in: inT, cacheRead, cacheWrite, out })
@@ -87,6 +87,30 @@ describe('prices', () => {
     expect(priceOf(anthropic, 'claude-opus-5-5')?.in).toBe(4)
     expect(priceOf({ ...anthropic, baseURL: 'https://proxy.example/anthropic' }, 'claude-opus-5-5')).toBeUndefined()
     expect(priceOf({ ...anthropic, prices: { 'claude-opus-5-5': { in: 3, out: 9 } } }, 'claude-opus-5-5')?.in).toBe(3)
+  })
+
+  it('knows the current and previous Claude models', () => {
+    expect(BUILTIN['claude-fable-5-1']).toEqual({ in: 10, out: 50, cacheRead: 0.25 })
+    expect(BUILTIN['claude-opus-5-5']).toEqual({ in: 4, out: 20, cacheRead: 0.2 })
+    expect(BUILTIN['claude-sonnet-5-5']).toEqual({ in: 2, out: 10, cacheRead: 0.2 })
+    expect(BUILTIN['claude-haiku-5-5']).toEqual({ in: 0.1, out: 0.5, long: { above: 100_000, in: 0.5, out: 2.5 } })
+    expect(priceOf(anthropic, 'claude-fable-5')).toEqual({ in: 10, out: 50 })
+    expect(priceOf(anthropic, 'claude-opus-5')).toEqual({ in: 5, out: 25 })
+    for (const m of ['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6']) expect(priceOf(anthropic, m)).toEqual({ in: 5, out: 25 })
+    expect(priceOf(anthropic, 'claude-sonnet-5')).toEqual({ in: 2, out: 10 })
+    expect(priceOf(anthropic, 'claude-sonnet-4-6')).toEqual({ in: 3, out: 15 })
+    expect(priceOf(anthropic, 'claude-haiku-4-5')).toEqual({ in: 1, out: 5 })
+    // cache reads default to 0.1× input: Fable 5 reads at $1, Sonnet 4.6 at $0.30
+    expect(charge(anthropic, 'claude-fable-5', u(0, 1e6, 0, 0))).toBeCloseTo(1)
+    expect(charge(anthropic, 'claude-sonnet-4-6', u(1e6, 1e6, 0, 1e6))).toBeCloseTo(3 + 0.3 + 15)
+  })
+
+  it('prices dated snapshots like their alias and ignores prototype keys', () => {
+    expect(priceOf(anthropic, 'claude-haiku-4-5-20251001')).toEqual({ in: 1, out: 5 })
+    expect(priceOf({ ...anthropic, prices: { 'claude-haiku-4-5-20251001': { in: 2, out: 6 } } }, 'claude-haiku-4-5-20251001')?.in).toBe(2)
+    expect(priceOf(anthropic, 'claude-unknown-20251001')).toBeUndefined()
+    expect(priceOf(anthropic, 'constructor')).toBeUndefined()
+    expect(charge(anthropic, 'toString', usage)).toBeNull()
   })
 
   it('charges per billing mode', () => {

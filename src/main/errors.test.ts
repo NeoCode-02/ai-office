@@ -1,3 +1,5 @@
+import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
 import { describe, expect, it } from 'vitest'
 import { classify } from './errors'
 
@@ -40,6 +42,31 @@ describe('classify', () => {
     expect(classify(api(503, null, 'Service Unavailable'))).toMatchObject({ kind: 'server', retry: true })
     expect(classify(Object.assign(new Error('Connection error.'), { status: undefined }))).toMatchObject({ kind: 'network', retry: true })
     expect(classify(new Error('Request timed out.'))).toMatchObject({ kind: 'network', retry: true })
+  })
+
+  it('marks a cancelled request as aborted so it is never retried', () => {
+    const aborted = { kind: 'other', retry: false, aborted: true }
+    expect(classify(new Anthropic.APIUserAbortError())).toMatchObject({ ...aborted, detail: 'Request was aborted.' })
+    expect(classify(new OpenAI.APIUserAbortError())).toMatchObject(aborted)
+    expect(classify(new DOMException('This operation was aborted', 'AbortError'))).toMatchObject(aborted)
+    expect(classify(Object.assign(new Error('The user aborted a request.'), { name: 'AbortError' }))).toMatchObject(aborted)
+    expect(classify(new Error('aborted'))).toMatchObject(aborted)
+    expect(classify('aborted')).toMatchObject(aborted)
+  })
+
+  it('does not mistake timeouts and dropped connections for an abort', () => {
+    for (const e of [
+      new Anthropic.APIConnectionTimeoutError(),
+      new OpenAI.APIConnectionTimeoutError(),
+      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+      // Node's http client when the server closes the socket mid-response
+      Object.assign(new Error('aborted'), { code: 'ECONNRESET' })
+    ]) {
+      const c = classify(e)
+      expect(c).toMatchObject({ kind: 'network', retry: true })
+      expect(c.aborted).toBeUndefined()
+    }
+    expect(classify(api(400, { message: 'Request aborted by the upstream model' })).aborted).toBeUndefined()
   })
 
   it('keeps app error codes and unknown errors as they are', () => {

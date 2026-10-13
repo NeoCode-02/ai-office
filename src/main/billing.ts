@@ -16,19 +16,36 @@ export function cost(price: Price, kind: ProviderKind, u: Usage): number {
 
 export const totalTokens = (u: Usage) => u.in + u.cacheRead + u.cacheWrite + u.out
 
-/** Anthropic list prices, USD / 1M tokens (platform docs, 2026-10-06). Cache writes are 1.25× input. */
+/**
+ * Anthropic list prices, USD / 1M tokens (platform docs as cached on 2026-10-06; list updated 2026-10-13).
+ * Cache reads are 0.1× input unless set here, cache writes 1.25× input.
+ */
 export const BUILTIN: Record<string, Price> = {
   'claude-fable-5-1': { in: 10, out: 50, cacheRead: 0.25 },
   'claude-opus-5-5': { in: 4, out: 20, cacheRead: 0.2 },
   'claude-sonnet-5-5': { in: 2, out: 10, cacheRead: 0.2 },
-  'claude-haiku-5-5': { in: 0.1, out: 0.5, long: { above: 100_000, in: 0.5, out: 2.5 } }
+  'claude-haiku-5-5': { in: 0.1, out: 0.5, long: { above: 100_000, in: 0.5, out: 2.5 } },
+  'claude-fable-5': { in: 10, out: 50 },
+  'claude-opus-5': { in: 5, out: 25 },
+  'claude-opus-4-8': { in: 5, out: 25 },
+  'claude-opus-4-7': { in: 5, out: 25 },
+  'claude-opus-4-6': { in: 5, out: 25 },
+  'claude-sonnet-5': { in: 2, out: 10 },
+  'claude-sonnet-4-6': { in: 3, out: 15 },
+  'claude-haiku-4-5': { in: 1, out: 5 }
 }
 
 const isAnthropicApi = (p: Pick<Provider, 'kind' | 'baseURL'>) =>
   p.kind === 'anthropic' && (!p.baseURL || /^https:\/\/api\.anthropic\.com\/?$/.test(p.baseURL))
 
+// Own keys only: a model named "constructor" must not find Object.prototype's.
+const own = (r: Record<string, Price> | undefined, k: string) => (r && Object.hasOwn(r, k) ? r[k] : undefined)
+
 export function priceOf(p: Pick<Provider, 'kind' | 'baseURL' | 'prices'>, model: string): Price | undefined {
-  return p.prices[model] ?? (isAnthropicApi(p) ? BUILTIN[model] : undefined)
+  if (own(p.prices, model)) return own(p.prices, model)
+  if (!isAnthropicApi(p)) return undefined
+  // The model list shows dated snapshots (claude-haiku-4-5-20251001); they cost the same as their alias.
+  return own(BUILTIN, model) ?? own(BUILTIN, model.replace(/-\d{8}$/, ''))
 }
 
 /** What a request costs the user: 0 on flat-fee or free accounts, null when no price is known. */

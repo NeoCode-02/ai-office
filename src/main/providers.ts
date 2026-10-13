@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
-import type { Preset, ProviderKind, Usage } from '../shared/types'
+import type { Effort, Preset, ProviderKind, Usage } from '../shared/types'
 
 export interface ToolDef {
   name: string
@@ -28,19 +28,32 @@ export interface Conn {
   apiKey: string
 }
 
+/** Per-member request settings, fixed for the life of a chat. */
+export interface ChatOpts {
+  /** Anthropic only; unset = the model's default effort. */
+  effort?: Effort
+  /** Longest reply in tokens; unset = the adapter's default. */
+  maxTokens?: number
+}
+export interface StepOpts {
+  signal?: AbortSignal
+  /** The reply so far, while it streams (Anthropic only). */
+  onText?(snapshot: string): void
+}
+
 /**
  * One agent's private conversation. History stays in the provider's native
  * format so provider-specific blocks (thinking, reasoning_content) replay intact.
- * A failed step leaves the history unchanged, so the same step can be retried.
+ * A failed or aborted step leaves the history unchanged, so the same step can be retried.
  */
 export interface Chat {
-  step(results: ToolResult[], text?: string): Promise<Turn>
+  step(results: ToolResult[], text?: string, opts?: StepOpts): Promise<Turn>
 }
 
-export function openChat(conn: Conn, model: string, system: string, tools: ToolDef[]): Chat {
+export function openChat(conn: Conn, model: string, system: string, tools: ToolDef[], opts: ChatOpts = {}): Chat {
   return conn.kind === 'anthropic'
-    ? anthropicChat(conn, model, system, tools)
-    : openaiChat(conn, model, system, tools)
+    ? anthropicChat(conn, model, system, tools, opts)
+    : openaiChat(conn, model, system, tools, opts)
 }
 
 /** Lists model ids for the "Model" picker; empty when the endpoint has no /models. */
@@ -60,7 +73,7 @@ export async function listModels(conn: Conn): Promise<string[]> {
 // Opus 5.x / Fable 5.x / Sonnet 5.5 can refuse on safety classifiers; let the API reroute.
 const FALLBACK_MODELS = /^claude-(fable-5|opus-5|sonnet-5-5)/
 
-function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef[]): Chat {
+function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef[], opts: ChatOpts): Chat {
   const client = new Anthropic({ apiKey: conn.apiKey, baseURL: conn.baseURL || undefined })
   const messages: Anthropic.Beta.BetaMessageParam[] = []
   const defs: Anthropic.Beta.BetaTool[] = tools.map((t) => ({
@@ -71,14 +84,17 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
   const fallback = FALLBACK_MODELS.test(model)
     ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }
     : {}
-  // tool_use ids from a refused turn: never run, but each still needs a tool_result.
+  // Older models (Haiku 4.5, Sonnet 4.5) reject effort, so it is sent only when the owner chose one.
+  const effort = opts.effort ? { output_config: { effort: opts.effort } } : {}
+  const maxTokens = tokenLimit(opts.maxTokens) ?? 32000
+  // tool_use ids from a refused or cut-off turn: never run, but each still needs a tool_result.
   let orphans: string[] = []
 
   return {
-    async step(results, text) {
+    async step(results, text, { signal, onText } = {}) {
       const mark = messages.length
       const prevOrphans = orphans
-      results = [...orphans.map((id) => ({ id, content: 'Not run: the previous reply was cut off', isError: true })), ...results]
+      results = [...orphans.map((id) => ({ id, content: CUT_OFF, isError: true })), ...results]
       orphans = []
       const content: Anthropic.Beta.BetaContentBlockParam[] = results.map((r) => ({
         type: 'tool_result',
@@ -91,17 +107,21 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
 
       let msg: Anthropic.Beta.BetaMessage
       try {
-        msg = await client.beta.messages
-          .stream({
-          model,
-          max_tokens: 32000,
-          system,
-          tools: defs,
-          messages,
-          cache_control: { type: 'ephemeral' },
-          ...fallback
-        })
-          .finalMessage()
+        const stream = client.beta.messages.stream(
+          {
+            model,
+            max_tokens: maxTokens,
+            system,
+            tools: defs,
+            messages,
+            cache_control: { type: 'ephemeral' },
+            ...effort,
+            ...fallback
+          },
+          { signal }
+        )
+        if (onText) stream.on('text', () => live(onText, textOf(stream.currentMessage?.content ?? [])))
+        msg = await stream.finalMessage()
       } catch (e) {
         messages.length = mark
         orphans = prevOrphans
@@ -110,7 +130,7 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
       messages.push({ role: 'assistant', content: msg.content })
 
       const turn: Turn = {
-        text: msg.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n'),
+        text: textOf(msg.content),
         calls: [],
         usage: {
           in: msg.usage.input_tokens,
@@ -133,43 +153,108 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
   }
 }
 
-function openaiChat(conn: Conn, model: string, system: string, tools: ToolDef[]): Chat {
+function openaiChat(conn: Conn, model: string, system: string, tools: ToolDef[], opts: ChatOpts): Chat {
   const client = new OpenAI({ apiKey: conn.apiKey, baseURL: conn.baseURL || undefined })
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: 'system', content: system }]
   const defs: OpenAI.Chat.ChatCompletionTool[] = tools.map((t) => ({
     type: 'function',
     function: { name: t.name, description: t.description, parameters: t.parameters }
   }))
+  const limit = tokenLimit(opts.maxTokens)
+  // OpenAI's reasoning models reject max_tokens; most other compatible APIs only know max_tokens.
+  const cap = limit === undefined ? {} : isOpenAI(conn.baseURL) ? { max_completion_tokens: limit } : { max_tokens: limit }
+  // tool_call ids from a cut-off reply: never run, but each still needs a tool message.
+  let orphans: string[] = []
 
   return {
-    async step(results, text) {
+    // No streaming: providers differ in whether a stream reports usage, and the cost must be right.
+    async step(results, text, { signal } = {}) {
       const mark = messages.length
+      const prevOrphans = orphans
+      results = [...orphans.map((id) => ({ id, content: CUT_OFF })), ...results]
+      orphans = []
       for (const r of results) messages.push({ role: 'tool', tool_call_id: r.id, content: r.content })
       if (text) messages.push({ role: 'user', content: text })
 
       let res: OpenAI.Chat.ChatCompletion
       try {
-        res = await client.chat.completions.create({ model, messages, tools: defs })
+        res = await client.chat.completions.create({ model, messages, ...(defs.length ? { tools: defs } : {}), ...cap }, { signal })
         if (!res.choices[0]) throw new Error('The provider returned an empty response')
       } catch (e) {
         messages.length = mark
+        orphans = prevOrphans
         throw e
       }
       const choice = res.choices[0]
-      // Push as returned: keeps extra fields like DeepSeek's reasoning_content.
-      messages.push(choice.message as OpenAI.Chat.ChatCompletionAssistantMessageParam)
+      messages.push(replayable(choice.message))
 
-      const calls: ToolCall[] = []
+      const turn: Turn = { text: choice.message.content ?? '', calls: [], usage: openaiUsage(res.usage) }
+      // A cut-off reply may hold a partial tool call: never run it.
+      if (choice.finish_reason === 'length') {
+        turn.text ||= '(the reply hit the length limit)'
+        orphans = (choice.message.tool_calls ?? []).map((c) => c.id)
+        return turn
+      }
       for (const c of choice.message.tool_calls ?? []) {
         if (c.type !== 'function') continue
-        calls.push({ id: c.id, name: c.function.name, input: parseArgs(c.function.arguments) })
+        turn.calls.push({ id: c.id, name: c.function.name, input: parseArgs(c.function.arguments) })
       }
-      return {
-        text: choice.message.content ?? '',
-        calls,
-        usage: openaiUsage(res.usage)
-      }
+      return turn
     }
+  }
+}
+
+/**
+ * The assistant message as returned (keeps extra fields like DeepSeek's reasoning_content),
+ * except tool arguments that are not a JSON object: some servers (Ollama) refuse them on replay.
+ */
+function replayable(m: OpenAI.Chat.ChatCompletionMessage): OpenAI.Chat.ChatCompletionAssistantMessageParam {
+  const msg = m as OpenAI.Chat.ChatCompletionAssistantMessageParam
+  const broken = (c: OpenAI.Chat.ChatCompletionMessageToolCall) => c.type === 'function' && !isJsonObject(c.function.arguments)
+  if (!m.tool_calls?.some(broken)) return msg
+  return {
+    ...msg,
+    tool_calls: m.tool_calls.map((c) => (c.type === 'function' && broken(c) ? { ...c, function: { ...c.function, arguments: '{}' } } : c))
+  }
+}
+
+function isJsonObject(s: unknown): boolean {
+  if (typeof s !== 'string') return false
+  try {
+    const v: unknown = JSON.parse(s)
+    return !!v && typeof v === 'object' && !Array.isArray(v)
+  } catch {
+    return false
+  }
+}
+
+/** OpenAI's own API, which is also where the SDK goes without a base URL. */
+function isOpenAI(baseURL: string): boolean {
+  if (!baseURL) return true
+  try {
+    return new URL(baseURL).hostname.toLowerCase() === 'api.openai.com'
+  } catch {
+    return false
+  }
+}
+
+const CUT_OFF = 'Not run: the previous reply was cut off'
+
+/** A usable reply limit, or undefined for the adapter's default. */
+function tokenLimit(n: number | undefined): number | undefined {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined
+}
+
+function textOf(content: Anthropic.Beta.BetaContentBlock[]): string {
+  return content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n')
+}
+
+/** A failing live view must never fail the request itself. */
+function live(onText: (snapshot: string) => void, snapshot: string) {
+  try {
+    onText(snapshot)
+  } catch {
+    // the final reply still arrives through the step's result
   }
 }
 

@@ -1,3 +1,5 @@
+import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
 import type { ErrorKind } from '../shared/types'
 
 export interface Classified {
@@ -7,6 +9,8 @@ export interface Classified {
   retryAfterMs?: number
   /** The provider's own words (or an app error code), shown under "Details". */
   detail: string
+  /** The office cancelled the request itself (stop): never retried, never charged. */
+  aborted?: boolean
 }
 
 // Provider wording differs, so the body and message are matched as text.
@@ -19,12 +23,23 @@ const MODEL = /model_not_found|model[^.]{0,40}(does not exist|not found|not avai
 // Gemini says "exceeded your current quota" for per-minute limits too; those carry a retry delay.
 const PER_MINUTE = /PerMinute|per minute|retryDelay/i
 const NETWORK = /connection error|timed? ?out|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket hang up|network/i
+// Default messages of the SDKs' and the platform's abort errors.
+const ABORTED = /^(request was |this operation was |the operation was )?aborted\.?$/i
 
 interface ApiErrorLike {
   status?: number
   headers?: { get?(name: string): string | null } | Record<string, string>
   error?: unknown
   message?: string
+  name?: string
+  code?: unknown
+}
+
+function isAbort(e: unknown, err: ApiErrorLike): boolean {
+  if (e instanceof Anthropic.APIUserAbortError || e instanceof OpenAI.APIUserAbortError) return true
+  if (err.name === 'AbortError') return true
+  // Node's http client also says "aborted" when the server drops the connection; that one is a network error.
+  return ABORTED.test(err.message ?? '') && err.code !== 'ECONNRESET'
 }
 
 function header(h: ApiErrorLike['headers'], name: string): string | null {
@@ -46,7 +61,8 @@ export function retryAfter(h: ApiErrorLike['headers']): number | undefined {
 
 export function classify(e: unknown): Classified {
   const err = (e && typeof e === 'object' ? e : { message: String(e) }) as ApiErrorLike
-  const message = err.message ?? ''
+  const message = typeof err.message === 'string' ? err.message : ''
+  if (isAbort(e, err)) return { kind: 'other', retry: false, detail: message.slice(0, 1000) || 'aborted', aborted: true }
   if (/^E_[A-Z_]+(\|.*)?$/.test(message)) return { kind: 'config', retry: false, detail: message }
   const status = typeof err.status === 'number' ? err.status : undefined
   const text = `${JSON.stringify(err.error ?? '')} ${message}`
@@ -62,6 +78,6 @@ export function classify(e: unknown): Classified {
   if (status === 404 || MODEL.test(text)) return out('model')
   if (status === 429 || status === 529 || RATE.test(text)) return out('rate', true)
   if (status !== undefined && (status >= 500 || status === 408 || status === 409)) return out('server', true)
-  if (status === undefined && NETWORK.test(message)) return out('network', true)
+  if (status === undefined && NETWORK.test(`${message} ${typeof err.code === 'string' ? err.code : ''}`)) return out('network', true)
   return out('other')
 }
