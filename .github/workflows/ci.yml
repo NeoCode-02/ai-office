@@ -9,7 +9,7 @@ jobs:
   check:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -24,3 +24,27 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # The built app, driven end to end against a fake provider (e2e/run.mjs). Needs the Electron binary.
+  e2e:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run e2e
+      - if: runner.os != 'Linux'
+        run: npm run e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-${{ matrix.os }}
+          path: e2e/failure.png
+          if-no-files-found: ignore
