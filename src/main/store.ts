@@ -28,11 +28,19 @@ export function createStore(dir: string, cipher: Cipher) {
     fs.renameSync(f + '.tmp', f)
   }
   const providers = () => read<StoredProvider[]>(file('providers.json'), [])
+  const readable = (enc: string) => {
+    try {
+      cipher.decrypt(enc)
+      return true
+    } catch {
+      return false
+    }
+  }
   const projectDir = (id: string) => file('projects', path.basename(id))
 
   return {
-    listProviders: (): Provider[] =>
-      providers().map(({ key, ...p }) => ({ ...p, hasKey: Boolean(key) })),
+    /** A key that can't be decrypted (e.g. OS keychain reset) counts as missing. */
+    listProviders: (): Provider[] => providers().map(({ key, ...p }) => ({ ...p, hasKey: Boolean(key) && readable(key) })),
 
     /** Empty `key` keeps the stored one. */
     saveProvider(p: Omit<Provider, 'hasKey'>, key: string) {
@@ -48,6 +56,7 @@ export function createStore(dir: string, cipher: Cipher) {
     conn(id: string): Conn {
       const p = providers().find((x) => x.id === id)
       if (!p) throw new Error('E_NO_PROVIDER')
+      if (p.key && !readable(p.key)) throw new Error(`E_KEY_UNREADABLE|${p.name}`)
       return { kind: p.kind, baseURL: p.baseURL, apiKey: p.key ? cipher.decrypt(p.key) : '' }
     },
 

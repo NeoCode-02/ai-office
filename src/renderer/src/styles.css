@@ -104,7 +104,7 @@ p { margin: 0; text-wrap: pretty; }
 
 .rail { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 .brand { height: 48px; display: flex; align-items: center; gap: 9px; padding: 0 18px; font-weight: 650; letter-spacing: -0.02em; font-size: 14.5px; }
-.brand-mark { width: 22px; height: 22px; color: var(--text); }
+.brand-mark { color: var(--text); flex-shrink: 0; }
 .rail-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 12px 6px 18px; font-size: 12px; font-weight: 500; color: var(--text-3); }
 .rail-list { flex: 1; overflow: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 1px; }
 .rail-item { position: relative; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border: 0; background: none; border-radius: 8px; color: var(--text-2); text-align: left; transition: background 0.15s, color 0.15s; }

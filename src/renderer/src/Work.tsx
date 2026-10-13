@@ -410,7 +410,7 @@ function FeedItem({ item, byId, nameOf, project, active }: { item: Item; byId: M
         </span>
         <div className="msg-main">
           <div className="msg-head"><span className="msg-name">{t.work.system}</span><span className="msg-time">{clock(e.at)}</span></div>
-          <div className="msg-body">{e.text}</div>
+          <div className="msg-body">{systemText(e.text)}</div>
         </div>
       </div>
     )
@@ -454,6 +454,12 @@ function FeedItem({ item, byId, nameOf, project, active }: { item: Item; byId: M
       </div>
     </div>
   )
+}
+
+/** System lines look like `Name: message`; the message may be an error code from main. */
+function systemText(text: string) {
+  const i = text.indexOf(': ')
+  return i < 0 ? errText(text) : `${text.slice(0, i)}: ${errText(text.slice(i + 2))}`
 }
 
 function PersonSheet({ agent, provider, manager, status, cost, focused, onFocus, onClose }: {

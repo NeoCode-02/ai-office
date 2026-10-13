@@ -140,7 +140,12 @@ export function createExtensions(dataDir: string, cipher: Cipher) {
   const storedMcp = (): (McpConfig & { id: string; enabled: boolean; plugin?: string })[] => {
     const s = state()
     const user = s.mcp.map((m) => {
-      const secrets = m.secrets ? cipher.decrypt(m.secrets) : ''
+      let secrets = ''
+      try {
+        secrets = m.secrets ? cipher.decrypt(m.secrets) : ''
+      } catch {
+        // Unreadable after an OS keychain reset: behave as if no secrets were saved.
+      }
       return {
         ...m,
         env: m.transport === 'stdio' ? parsePairs(secrets, '=') : {},
