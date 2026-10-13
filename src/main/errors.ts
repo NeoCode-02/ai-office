@@ -22,7 +22,7 @@ const RATE = /rate[_ ]limit|too many requests|overloaded|resource_exhausted|"cod
 const MODEL = /model_not_found|model[^.]{0,40}(does not exist|not found|not available)/i
 // Gemini says "exceeded your current quota" for per-minute limits too; those carry a retry delay.
 const PER_MINUTE = /PerMinute|per minute|retryDelay/i
-const NETWORK = /connection error|timed? ?out|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket hang up|network/i
+const NETWORK = /connection error|timed? ?out|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket hang up|network|terminated|UND_ERR/i
 // Default messages of the SDKs' and the platform's abort errors.
 const ABORTED = /^(request was |this operation was |the operation was )?aborted\.?$/i
 
@@ -40,6 +40,19 @@ function isAbort(e: unknown, err: ApiErrorLike): boolean {
   if (err.name === 'AbortError') return true
   // Node's http client also says "aborted" when the server drops the connection; that one is a network error.
   return ABORTED.test(err.message ?? '') && err.code !== 'ECONNRESET'
+}
+
+/** Messages and codes of the error's causes: undici reports a dropped socket as cause `UND_ERR_SOCKET`. */
+function causes(err: { cause?: unknown }): string {
+  const out: string[] = []
+  let c = err.cause
+  for (let i = 0; i < 4 && c && typeof c === 'object'; i++) {
+    const x = c as { message?: unknown; code?: unknown; cause?: unknown }
+    if (typeof x.message === 'string') out.push(x.message)
+    if (typeof x.code === 'string') out.push(x.code)
+    c = x.cause
+  }
+  return out.join(' ')
 }
 
 function header(h: ApiErrorLike['headers'], name: string): string | null {
@@ -78,6 +91,6 @@ export function classify(e: unknown): Classified {
   if (status === 404 || MODEL.test(text)) return out('model')
   if (status === 429 || status === 529 || RATE.test(text)) return out('rate', true)
   if (status !== undefined && (status >= 500 || status === 408 || status === 409)) return out('server', true)
-  if (status === undefined && NETWORK.test(`${message} ${typeof err.code === 'string' ? err.code : ''}`)) return out('network', true)
+  if (status === undefined && NETWORK.test(`${message} ${typeof err.code === 'string' ? err.code : ''} ${causes(err as { cause?: unknown })}`)) return out('network', true)
   return out('other')
 }

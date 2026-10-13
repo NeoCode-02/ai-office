@@ -582,12 +582,12 @@ export class Office {
         else m.handoff = 'compact'
         m.resume = { input, results: [] }
         this.emit({ type: 'compact', agentId: a.id, tokens, at: Date.now() })
-        this.charge(m, turn.usage)
+        this.charge(m, turn.usage, turn.model)
         return
       }
       input = undefined
       m.promptSize = turn.usage.in + turn.usage.cacheRead + turn.usage.cacheWrite
-      this.charge(m, turn.usage)
+      this.charge(m, turn.usage, turn.model)
       if (!turn.calls.length) {
         if (!sent && turn.text.trim() && this.running) this.forward(a, turn.text)
         return
@@ -755,9 +755,11 @@ export class Office {
     )
   }
 
-  private charge(m: Member, usage: Usage) {
+  /** `served`: the model that really answered (a server-side fallback), priced instead of the requested one. */
+  private charge(m: Member, usage: Usage, served?: string) {
     const a = m.agent
-    const { providerId, model } = this.current(m)
+    const { providerId, model: asked } = this.current(m)
+    const model = served ?? asked
     const usd = this.deps.charge(providerId, model, usage)
     this.spent += usd ?? 0
     this.requestCount++

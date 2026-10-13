@@ -95,6 +95,23 @@ describe('Anthropic adapter', () => {
     expect(api.seen[1].body.output_config).toEqual({ effort: 'xhigh' })
   })
 
+  it('after a mid-reply fallback uses only what the fallback model wrote, and names it for pricing', async () => {
+    const served = { ...start, message: { ...start.message, model: 'claude-opus-5' } }
+    const fallback = { type: 'content_block_start', index: 1, content_block: { type: 'fallback', from: { model: 'claude-opus-5-5' }, to: { model: 'claude-opus-5' } } }
+    const api = await fakeApi([
+      streamed(served, ...textBlock(0, ['half']), ...toolBlock(2, 'old', '{"path":"x"}'), fallback, { type: 'content_block_stop', index: 1 }, ...textBlock(3, ['final']), ...toolBlock(4, 'new', '{"path":"y"}'), ...end('tool_use')),
+      hello
+    ])
+    const chat = openChat(anthropic(api.url), 'claude-opus-5-5', 'sys', [tool])
+    const turn = await chat.step([], 'hi')
+    expect(turn.text).toBe('final')
+    expect(turn.calls.map((c) => c.id)).toEqual(['new'])
+    expect(turn.model).toBe('claude-opus-5')
+    await chat.step([{ id: 'new', content: 'ok' }])
+    // The fallback block is echoed back where it was.
+    expect(api.seen[1].body.messages[1].content.map((b: { type: string }) => b.type)).toEqual(['text', 'tool_use', 'fallback', 'text', 'tool_use'])
+  })
+
   it('keeps the server-side fallback for the models that support it', async () => {
     const api = await fakeApi([hello, hello])
     await openChat(anthropic(api.url), 'claude-opus-5-5', 'sys', []).step([], 'hi')

@@ -21,6 +21,8 @@ export interface Turn {
   text: string
   calls: ToolCall[]
   usage: Usage
+  /** The model that wrote the reply, when the API says it differs (server-side fallback). */
+  model?: string
 }
 export interface Conn {
   kind: ProviderKind
@@ -127,17 +129,22 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
         orphans = prevOrphans
         throw e
       }
+      // History keeps every block verbatim (the server validates the fallback boundary).
       messages.push({ role: 'assistant', content: msg.content })
+      // After a mid-reply fallback only what follows the last fallback block counts.
+      const cut = msg.content.map((b) => b.type).lastIndexOf('fallback')
+      const served = cut < 0 ? msg.content : msg.content.slice(cut + 1)
 
       const turn: Turn = {
-        text: textOf(msg.content),
+        text: textOf(served),
         calls: [],
         usage: {
           in: msg.usage.input_tokens,
           cacheRead: msg.usage.cache_read_input_tokens ?? 0,
           cacheWrite: msg.usage.cache_creation_input_tokens ?? 0,
           out: msg.usage.output_tokens
-        }
+        },
+        ...(cut >= 0 && msg.model !== model ? { model: msg.model } : {})
       }
       // Refused or cut-off turns may hold a partial tool_use: never run it.
       if (msg.stop_reason === 'refusal' || msg.stop_reason === 'max_tokens') {
@@ -145,7 +152,7 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
         orphans = msg.content.flatMap((b) => (b.type === 'tool_use' ? [b.id] : []))
         return turn
       }
-      for (const b of msg.content) {
+      for (const b of served) {
         if (b.type === 'tool_use') turn.calls.push({ id: b.id, name: b.name, input: asObject(b.input) })
       }
       return turn

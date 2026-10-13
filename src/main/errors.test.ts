@@ -54,6 +54,12 @@ describe('classify', () => {
     expect(classify('aborted')).toMatchObject(aborted)
   })
 
+  it('treats a socket dropped mid-response as a network error', () => {
+    const dropped = Object.assign(new TypeError('terminated'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) })
+    expect(classify(dropped)).toMatchObject({ kind: 'network', retry: true })
+    expect(classify(Object.assign(new Error('Connection error.'), { cause: dropped }))).toMatchObject({ kind: 'network', retry: true })
+  })
+
   it('does not mistake timeouts and dropped connections for an abort', () => {
     for (const e of [
       new Anthropic.APIConnectionTimeoutError(),

@@ -43,6 +43,13 @@ function setup(a: Agent, steps: Record<string, Step>, conn?: (id: string) => voi
 }
 
 describe('model failures', () => {
+  it('prices a reply by the model that wrote it after a server-side fallback', async () => {
+    const { office, events, settle } = setup(agent('ceo'), { main: () => ({ ...report('done'), model: 'served-model' }) })
+    office.start('go')
+    await settle()
+    expect(events.find((e) => e.type === 'cost')).toMatchObject({ providerId: 'p', model: 'served-model' })
+  })
+
   it('retries a rate limit with the same input and the provider\'s delay', async () => {
     const inputs: (string | undefined)[] = []
     let n = 0
