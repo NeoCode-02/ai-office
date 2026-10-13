@@ -2,6 +2,7 @@ import dns from 'node:dns'
 import http from 'node:http'
 import https from 'node:https'
 import net from 'node:net'
+import os from 'node:os'
 import zlib from 'node:zlib'
 import { clip } from './exec'
 
@@ -75,6 +76,20 @@ function classifyV6(g: number[]): AddressClass {
   return 'public'
 }
 
+/** A comparable form of an IP address ('' when it is not one). */
+function ipKey(ip: string): string {
+  const bare = ip.replace(/^\[(.*)\]$/, '$1').replace(/%.*$/, '')
+  const family = net.isIP(bare)
+  return family === 4 ? bare : family === 6 ? v6Groups(bare).join(':') : ''
+}
+
+/** True for any address of this computer's own network interfaces (a public IPv6 too). */
+export function isOwnAddress(ip: string, interfaces: ReturnType<typeof os.networkInterfaces> = os.networkInterfaces()): boolean {
+  const key = ipKey(ip)
+  if (!key) return false
+  return Object.values(interfaces).some((list) => list?.some((i) => ipKey(i.address) === key))
+}
+
 /** What kind of network an IP address is on; anything that is not an IP address is 'reserved'. */
 export function classifyAddress(ip: string): AddressClass {
   const bare = ip.replace(/^\[(.*)\]$/, '$1').replace(/%.*$/, '')
@@ -86,11 +101,39 @@ export function classifyAddress(ip: string): AddressClass {
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' }
 
+const SKIP = new Set(['script', 'style', 'noscript', 'svg'])
+const BREAK = /^(br|\/(p|div|li|h[1-6]|tr))(\s|\/|$)/
+
+/**
+ * Visible text of an HTML page. One pass with indexOf, so hostile markup (thousands of unclosed
+ * `<script` or `<`) costs linear time; an unclosed tag or skipped element ends the text.
+ */
 export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, '')
-    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+  let out = ''
+  for (let i = 0; i < html.length; ) {
+    const lt = html.indexOf('<', i)
+    if (lt < 0) {
+      out += html.slice(i)
+      break
+    }
+    out += html.slice(i, lt)
+    const gt = html.indexOf('>', lt + 1)
+    if (gt < 0) break
+    const tag = html.slice(lt + 1, gt).trim().toLowerCase()
+    const name = /^[a-z0-9]+/.exec(tag)?.[0] ?? ''
+    if (SKIP.has(name)) {
+      const closing = new RegExp(`</${name}`, 'gi')
+      closing.lastIndex = gt + 1
+      const end = closing.exec(html)?.index ?? -1
+      const close = end < 0 ? -1 : html.indexOf('>', end)
+      if (close < 0) break
+      i = close + 1
+      continue
+    }
+    if (BREAK.test(tag)) out += '\n'
+    i = gt + 1
+  }
+  return out
     .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_, e: string) => ENTITIES[e])
     .replace(/[ \t]+/g, ' ')
     .replace(/\n\s*\n+/g, '\n\n')
@@ -270,7 +313,8 @@ export async function webFetch(url: string, opts: FetchOpts = {}): Promise<strin
     const where = (address: string) => (address === host ? host : `${host} (${address})`)
     let local: string | undefined
     for (const a of addrs) {
-      const cls = classifyAddress(a.address)
+      // The computer's own public addresses reach its local services just like 127.0.0.1.
+      const cls = classifyAddress(a.address) === 'public' && isOwnAddress(a.address) ? 'loopback' : classifyAddress(a.address)
       if (BLOCKED.has(cls)) throw new Error(`Blocked: ${where(a.address)} is ${cls === 'unspecified' ? 'an' : 'a'} ${cls} address; such addresses are never fetched`)
       if (cls !== 'public') local ??= a.address
     }

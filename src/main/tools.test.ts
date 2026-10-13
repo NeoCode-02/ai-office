@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import dns from 'node:dns'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -356,6 +357,8 @@ describe('docker sandbox', () => {
       'none',
       '--user',
       '1000:1000',
+      '-e',
+      'HOME=/tmp',
       'node:22-bookworm',
       'sh',
       '-lc',
@@ -364,6 +367,13 @@ describe('docker sandbox', () => {
     const open = dockerArgs('C:\\Users\\me\\ws', 'ls', { ...sandbox, network: true, image: 'ghcr.io/acme/tools:1.2@sha256:abc' }, 'n', '')
     expect(open).toEqual(['run', '--rm', '--name', 'n', '-v', 'C:\\Users\\me\\ws:/workspace', '-w', '/workspace', 'ghcr.io/acme/tools:1.2@sha256:abc', 'sh', '-lc', 'ls'])
     if (!win) expect(dockerArgs('/ws', 'ls', sandbox, 'n')).toContain(`${process.getuid!()}:${process.getgid!()}`)
+  })
+
+  it('mounts the workspace .git read-only, so sandboxed commands cannot plant hooks', () => {
+    const args = dockerArgs('/home/me/ws', 'ls', sandbox, 'n', '', true)
+    const i = args.indexOf(`${path.join('/home/me/ws', '.git')}:/workspace/.git:ro`)
+    expect(i).toBeGreaterThan(args.indexOf('/home/me/ws:/workspace'))
+    expect(args[i - 1]).toBe('-v')
   })
 
   it('refuses image names that docker would read as options, and paths it cannot mount', () => {
@@ -722,5 +732,32 @@ describe('unifiedDiff', () => {
     const before = Array.from({ length: 1500 }, (_, i) => `old ${i}`).join('\n') + '\n'
     const after = Array.from({ length: 1500 }, (_, i) => `new ${i}`).join('\n') + '\n'
     expect(applyDiff(before, unifiedDiff('f', before, after, { maxLines: 100_000 }))).toBe(after)
+  })
+})
+
+describe('file tools and commands in one workspace', () => {
+  it('a file tool waits until a running command has ended', async () => {
+    const root = tmp('gate-')
+    const order: string[] = []
+    const cmd = run(root, 'run_command', { command: `node -e "setTimeout(() => {}, 700)"` }, { approve: async () => true }).then(() => order.push('command'))
+    await new Promise((r) => setTimeout(r, 150))
+    const file = run(root, 'write_file', { path: 'a.txt', content: 'x' }).then(() => order.push('write'))
+    await Promise.all([cmd, file])
+    expect(order).toEqual(['command', 'write'])
+  })
+
+  it('refuses to write over something that is not a regular file', async () => {
+    const root = tmp('nonreg-')
+    fs.mkdirSync(path.join(root, 'dir'))
+    expect((await run(root, 'write_file', { path: 'dir', content: 'x' })).content).toMatch(/folder/)
+  })
+
+  it.skipIf(win)('does not freeze on a FIFO', async () => {
+    const root = tmp('fifo-')
+    execFileSync('mkfifo', [path.join(root, 'pipe')])
+    const t = Date.now()
+    expect((await run(root, 'write_file', { path: 'pipe', content: 'x' })).content).toMatch(/not a regular file/)
+    expect((await run(root, 'read_file', { path: 'pipe' })).content).toMatch(/not a regular file/)
+    expect(Date.now() - t).toBeLessThan(2000)
   })
 })

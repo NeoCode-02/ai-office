@@ -46,7 +46,7 @@ export const TOOL_DEFS: Record<ToolName, ToolDef> = {
   },
   run_command: {
     name: 'run_command',
-    description: `Run a shell command in the workspace folder (${process.platform === 'win32' ? 'Windows cmd.exe' : 'sh'}). It is stopped after 2 minutes (10 minutes in the Docker sandbox). Input is closed, so commands must not wait for answers. Background processes are stopped when the command ends unless their output goes to a file. Use for builds, tests, git, scripts.`,
+    description: `Run a shell command in the workspace folder (${process.platform === 'win32' ? 'Windows cmd.exe' : 'sh'}). It is stopped after 2 minutes (10 minutes in the Docker sandbox). Input is closed, so commands must not wait for answers. When it ends, is stopped or times out, the processes it started are ended where possible, but programs that detach themselves (daemons, setsid) may keep running. Use for builds, tests, git, scripts.`,
     parameters: params({ command: str('The command line') }, ['command'])
   },
   web_fetch: {
@@ -203,18 +203,77 @@ function listTree(dir: string, root: string, links: boolean): string[] {
 
 type Text = { text: string; size: number } | { binary: true; size: number }
 
+// Not on Windows (0 there). NOFOLLOW: a link swapped in after the path check is refused, not followed.
+// NONBLOCK: opening a FIFO returns at once instead of freezing the app.
+const { O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC } = fs.constants
+const SAFE = (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0)
+
+/** Opens only regular files; checked on the open descriptor, so the check can't be raced. */
+function openRegular(f: string, flags: number): number {
+  const fd = fs.openSync(f, flags | SAFE)
+  const st = fs.fstatSync(fd)
+  if (st.isFile()) return fd
+  fs.closeSync(fd)
+  throw new Error(st.isDirectory() ? 'This is a folder; use list_files' : 'This is not a regular file')
+}
+
 /** A regular file's text; binary files (NUL in the first 8 KB) are not decoded. */
 function readText(f: string): Text {
-  const st = fs.statSync(f)
-  if (st.isDirectory()) throw new Error('This is a folder; use list_files')
-  if (!st.isFile()) throw new Error('This is not a regular file')
-  if (st.size > MAX_READ) {
-    throw new Error(`The file is too large to read (${(st.size / 1024 / 1024).toFixed(1)} MB, limit 5 MB); use search_files on it to find the lines you need`)
+  const fd = openRegular(f, O_RDONLY)
+  try {
+    const size = fs.fstatSync(fd).size
+    if (size > MAX_READ) {
+      throw new Error(`The file is too large to read (${(size / 1024 / 1024).toFixed(1)} MB, limit 5 MB); use search_files on it to find the lines you need`)
+    }
+    const buf = fs.readFileSync(fd)
+    if (buf.subarray(0, 8192).includes(0)) return { binary: true, size: buf.length }
+    return { text: buf.toString('utf8'), size: buf.length }
+  } finally {
+    fs.closeSync(fd)
   }
-  const buf = fs.readFileSync(f)
-  if (buf.subarray(0, 8192).includes(0)) return { binary: true, size: buf.length }
-  return { text: buf.toString('utf8'), size: buf.length }
 }
+
+/** Writes a regular file; refuses FIFOs, devices and folders instead of blocking on them. */
+function writeRegular(f: string, content: string) {
+  let st: fs.Stats | undefined
+  try {
+    st = fs.lstatSync(f)
+  } catch (e) {
+    if (!isMissing(e)) throw e
+  }
+  if (st && !st.isFile()) throw new Error(st.isDirectory() ? 'This is a folder, not a file' : 'This is not a regular file')
+  const fd = openRegular(f, O_WRONLY | O_CREAT | O_TRUNC)
+  try {
+    fs.writeFileSync(fd, content)
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/**
+ * Commands and file tools never overlap in one workspace: a command could swap a folder for a
+ * symlink between a file tool's path check and its open. Commands may overlap each other.
+ */
+const gates = new Map<string, { commands: number; waiting: (() => void)[] }>()
+const gateOf = (root: string) => gates.get(root) ?? gates.set(root, { commands: 0, waiting: [] }).get(root)!
+
+async function noCommandRunning(root: string) {
+  const g = gateOf(root)
+  while (g.commands > 0) await new Promise<void>((resolve) => g.waiting.push(resolve))
+}
+
+async function asCommand<T>(root: string, run: () => Promise<T>): Promise<T> {
+  const g = gateOf(root)
+  g.commands++
+  try {
+    return await run()
+  } finally {
+    g.commands--
+    if (g.commands === 0) for (const resolve of g.waiting.splice(0)) resolve()
+  }
+}
+
+const FILE_TOOLS = new Set<string>(['list_files', 'read_file', 'write_file', 'edit_file'])
 
 const shown = (t: Text) => ('binary' in t ? `binary file, ${t.size} bytes` : clip(t.text, 100_000))
 
@@ -243,6 +302,9 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
   const s = (k: string) => a[k] as string
 
   try {
+    const gate = fs.realpathSync(ctx.root)
+    // The bodies below are synchronous, so no command can start while one runs.
+    if (FILE_TOOLS.has(def.name)) await noCommandRunning(gate)
     switch (def.name as ToolName) {
       case 'list_files': {
         const { base, target } = resolveIn(ctx.root, s('path'))
@@ -258,7 +320,7 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
         const { file, changed } = writable(ctx.root, s('path'))
         const before = previous(file)
         fs.mkdirSync(path.dirname(file), { recursive: true })
-        fs.writeFileSync(file, s('content'))
+        writeRegular(file, s('content'))
         return { ...ok(`Wrote ${s('path')}`), changed, diff: before === undefined ? undefined : unifiedDiff(changed, before, s('content')) }
       }
       case 'edit_file': {
@@ -269,12 +331,12 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
         const n = t.text.split(s('old_text')).length - 1
         if (n !== 1) return fail(`old_text found ${n} times; it must match exactly once`)
         const after = t.text.replace(s('old_text'), () => s('new_text'))
-        fs.writeFileSync(file, after)
+        writeRegular(file, after)
         return { ...ok(`Edited ${s('path')}`), changed, diff: unifiedDiff(changed, t.text, after) }
       }
       case 'run_command':
         if (!(await ctx.approve(s('command')))) return fail('The owner declined this command')
-        return await exec(s('command'), ctx.root, { signal: ctx.signal, sandbox: ctx.sandbox })
+        return await asCommand(gate, () => exec(s('command'), ctx.root, { signal: ctx.signal, sandbox: ctx.sandbox }))
       case 'web_fetch':
         return ok(await webFetch(s('url'), { signal: ctx.signal, approveLocal: ctx.approveFetch && ((url) => ctx.approveFetch!(url)) }))
       case 'message': {

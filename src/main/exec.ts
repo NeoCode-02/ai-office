@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
+import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { Sandbox } from '../shared/types'
 
@@ -31,7 +32,7 @@ export interface ExecResult {
 const posixUser = () => (process.getuid && process.getgid ? `${process.getuid()}:${process.getgid()}` : undefined)
 
 /** `docker run` arguments: only the workspace is mounted; the command runs in a login shell. */
-export function dockerArgs(root: string, command: string, sandbox: Sandbox, name: string, user = posixUser()): string[] {
+export function dockerArgs(root: string, command: string, sandbox: Sandbox, name: string, user = posixUser(), hasGit = fs.existsSync(path.join(root, '.git'))): string[] {
   if (!IMAGE.test(sandbox.image) || sandbox.image.length > 255) throw new Error(`Invalid Docker image name "${sandbox.image}"`)
   // ":" separates the parts of -v; a Windows drive letter is the one place Docker expects it.
   if ((/^[a-z]:[\\/]/i.test(root) ? root.slice(2) : root).includes(':')) throw new Error('The workspace path contains ":", which Docker cannot mount')
@@ -42,10 +43,13 @@ export function dockerArgs(root: string, command: string, sandbox: Sandbox, name
     name,
     '-v',
     `${root}:/workspace`,
+    // Read-only, so a sandboxed command can't plant git hooks that later run on the host.
+    ...(hasGit ? ['-v', `${path.join(root, '.git')}:/workspace/.git:ro`] : []),
     '-w',
     '/workspace',
     ...(sandbox.network ? [] : ['--network', 'none']),
-    ...(user ? ['--user', user] : []),
+    // A uid without a passwd entry has no home; tools that write there need one.
+    ...(user ? ['--user', user, '-e', 'HOME=/tmp'] : []),
     sandbox.image,
     'sh',
     '-lc',
