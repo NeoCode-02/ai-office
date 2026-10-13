@@ -109,6 +109,15 @@ export default function App() {
     known.current = projects
   }, [projects])
 
+  // "Always allow" adds a rule to the saved office in the main process; reload so a later save keeps it.
+  useEffect(
+    () =>
+      window.office.onEvent((_p, _r, ev) => {
+        if (ev.type === 'approval_done' && ev.always) void reload().catch(() => undefined)
+      }),
+    [reload]
+  )
+
   // A notification was clicked.
   useEffect(
     () =>

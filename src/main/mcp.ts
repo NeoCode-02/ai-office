@@ -40,14 +40,14 @@ export class McpClient {
 
   private constructor(private cfg: McpConfig) {}
 
-  static async connect(cfg: McpConfig): Promise<McpClient> {
+  static async connect(cfg: McpConfig, clientVersion = '0.0.0'): Promise<McpClient> {
     const c = new McpClient(cfg)
     if (cfg.transport === 'stdio') c.spawn()
     try {
       const init = (await c.request('initialize', {
         protocolVersion: PROTOCOL,
         capabilities: {},
-        clientInfo: { name: 'ai-office', version: '0.2.0' }
+        clientInfo: { name: 'ai-office', version: clientVersion }
       })) as { protocolVersion?: string }
       if (init.protocolVersion) c.version = init.protocolVersion
       await c.notify('notifications/initialized')
@@ -222,12 +222,15 @@ export interface McpToolbox {
 export class McpPool {
   private clients = new Map<string, Promise<McpClient>>()
 
-  constructor(private config: (id: string) => McpConfig | null) {}
+  constructor(
+    private config: (id: string) => McpConfig | null,
+    private clientVersion?: string
+  ) {}
 
   private get(id: string, cfg: McpConfig): Promise<McpClient> {
     let c = this.clients.get(id)
     if (!c) {
-      c = McpClient.connect(cfg)
+      c = McpClient.connect(cfg, this.clientVersion)
       c.catch(() => this.clients.delete(id))
       this.clients.set(id, c)
     }
