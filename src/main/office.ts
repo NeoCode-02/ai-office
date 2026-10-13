@@ -324,7 +324,7 @@ export class Office {
     const a = m.agent
     const usd = this.deps.charge(a.providerId, a.model, usage)
     this.spent += usd ?? 0
-    this.emit({ type: 'cost', agentId: a.id, usd, usage, at: Date.now() })
+    this.emit({ type: 'cost', agentId: a.id, providerId: a.providerId, model: a.model, usd, usage, at: Date.now() })
     if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) this.stop('budget', this.spent)
   }
 }

@@ -92,11 +92,51 @@ export type OfficeEvent =
   | { type: 'tool'; id: string; at: number; agentId: string; name: string; summary: string; ok: boolean }
   | { type: 'status'; agentId: string; status: AgentStatus; at: number }
   /** usd is null when the price is unknown. Runs saved before v0.3 have inTok/outTok instead of usage. */
-  | { type: 'cost'; agentId: string; usd: number | null; usage?: Usage; inTok?: number; outTok?: number; at: number }
+  | { type: 'cost'; agentId: string; providerId?: string; model?: string; usd: number | null; usage?: Usage; inTok?: number; outTok?: number; at: number }
   | { type: 'approval'; id: string; agentId: string; kind: 'command' | 'mcp'; command: string; at: number }
   | { type: 'approval_done'; id: string; approved: boolean; at: number }
   /** reason is a code: owner_stopped | new_task | idle | report | budget (usd set) */
   | { type: 'run'; runId: string; state: RunState; reason?: string; usd?: number; at: number }
+
+/** One model request, as kept in the usage log. */
+export interface UsageRecord extends Omit<Usage, 'usd'> {
+  at: number
+  projectId: string
+  runId: string
+  agentId: string
+  agent: string
+  providerId: string
+  model: string
+  usd: number | null
+}
+
+export interface UsageRow {
+  requests: number
+  in: number
+  cacheRead: number
+  cacheWrite: number
+  out: number
+  usd: number
+  /** Requests whose price was unknown; their cost is not in `usd`. */
+  unpriced: number
+}
+
+export interface UsageStats {
+  total: UsageRow
+  byModel: (UsageRow & { providerId: string; model: string })[]
+  byAgent: (UsageRow & { projectId: string; agentId: string; agent: string; model: string })[]
+  byDay: { day: string; usd: number; tokens: number }[]
+}
+
+export interface QuotaUse {
+  used: number
+  amount: number
+  unit: 'usd' | 'requests' | 'tokens'
+  window: '5h' | 'day' | 'week' | 'month'
+}
+
+/** What the provider's own API says is left. */
+export type Balance = { kind: 'balance'; amount: number; currency: string } | { kind: 'key'; remaining: number | null; used: number }
 
 export interface RunSummary {
   id: string

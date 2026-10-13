@@ -2,7 +2,9 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } 
 import fs from 'node:fs'
 import path from 'node:path'
 import type { McpServer, OfficeEvent, Price, Project, Provider } from '../shared/types'
+import { balance } from './balance'
 import { charge, fetchCatalog, matchCatalog, priceOf } from './billing'
+import { quotaUse, stats, windowStart } from './stats'
 import { createExtensions } from './extensions'
 import { McpClient, McpPool } from './mcp'
 import { Office } from './office'
@@ -65,6 +67,10 @@ function project(id: string): Project {
 
 function emit(projectId: string, runId: string, ev: OfficeEvent) {
   store.appendEvent(projectId, runId, ev)
+  if (ev.type === 'cost' && ev.usage && ev.providerId && ev.model) {
+    const agent = store.listProjects().find((p) => p.id === projectId)?.agents.find((a) => a.id === ev.agentId)?.name ?? ev.agentId
+    store.appendUsage({ ...ev.usage, at: ev.at, projectId, runId, agentId: ev.agentId, agent, providerId: ev.providerId, model: ev.model, usd: ev.usd })
+  }
   if (ev.type === 'run') {
     const run = store.listRuns(projectId).find((r) => r.id === runId)
     if (run) store.saveRun(projectId, { ...run, state: ev.state })
@@ -97,6 +103,19 @@ const handlers = {
     }
     return out
   },
+
+  /** Usage in [from, to) plus each provider's quota use right now. */
+  usageStats: (from: number, to: number, projectId?: string) => {
+    const now = Date.now()
+    const providers = store.listProviders()
+    const windowFrom = Math.min(from, ...providers.map((p) => (p.billing.quota ? windowStart(p.billing.quota.window, now) : now)))
+    const records = store.readUsage(windowFrom, Math.max(to, now + 1))
+    return {
+      stats: stats(records, from, to, projectId),
+      quotas: Object.fromEntries(providers.map((p) => [p.id, quotaUse(records, p.id, p.billing, now)]))
+    }
+  },
+  balance: (id: string) => balance(store.conn(id)),
 
   listProjects: () => store.listProjects(),
   saveProject: (p: Project) => store.saveProject(p),

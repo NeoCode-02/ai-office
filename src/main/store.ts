@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { OfficeEvent, Project, Provider, RunSummary } from '../shared/types'
+import type { OfficeEvent, Project, Provider, RunSummary, UsageRecord } from '../shared/types'
 import type { Conn } from './providers'
 
 interface StoredProvider extends Omit<Provider, 'hasKey'> {
@@ -121,6 +121,33 @@ export function createStore(dir: string, cipher: Cipher) {
         .split('\n')
         .filter(Boolean)
         .map((l) => JSON.parse(l) as OfficeEvent)
+    },
+
+    /** One JSONL file per month keeps reads proportional to the range asked for. */
+    appendUsage(r: UsageRecord) {
+      const d = new Date(r.at)
+      const f = file('usage', `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}.jsonl`)
+      fs.mkdirSync(path.dirname(f), { recursive: true })
+      fs.appendFileSync(f, JSON.stringify(r) + '\n')
+    },
+
+    readUsage(from: number, to: number): UsageRecord[] {
+      const out: UsageRecord[] = []
+      const end = new Date(to)
+      for (let d = new Date(new Date(from).getFullYear(), new Date(from).getMonth(), 1); d <= end; d.setMonth(d.getMonth() + 1)) {
+        const f = file('usage', `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}.jsonl`)
+        if (!fs.existsSync(f)) continue
+        for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+          if (!line) continue
+          try {
+            const r = JSON.parse(line) as UsageRecord
+            if (r.at >= from && r.at < to) out.push(r)
+          } catch {
+            // a line cut off by a crash; skip it
+          }
+        }
+      }
+      return out
     },
 
     readNotes(projectId: string, agentId: string): string {
