@@ -26,10 +26,13 @@ const primary = app.requestSingleInstanceLock()
 if (!primary) app.quit()
 
 const dataDir = path.join(app.getPath('userData'), 'data')
+// Linux without GNOME Keyring/KWallet: only when the owner starts the app with --password-store=basic
+// are keys kept with Chromium's built-in (not secret) password; otherwise saving a key says why it can't.
+const plainKeys = process.platform === 'linux' && app.commandLine.getSwitchValue('password-store') === 'basic'
+if (plainKeys) safeStorage.setUsePlainTextEncryption(true)
 const cipher = {
   encrypt: (s: string) => {
-    // Linux without GNOME Keyring/KWallet: say so instead of Chromium's raw error.
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('E_NO_KEYCHAIN')
+    if (!plainKeys && !safeStorage.isEncryptionAvailable()) throw new Error('E_NO_KEYCHAIN')
     return safeStorage.encryptString(s).toString('base64')
   },
   decrypt: (s: string) => safeStorage.decryptString(Buffer.from(s, 'base64'))
