@@ -1,18 +1,41 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { OfficeEvent, Project, Provider } from '../../shared/types'
-import { useT } from './i18n'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import type { Project, Provider } from '../../shared/types'
+import { errText, useT } from './i18n'
+import { applyLive, createBatcher, officeState, type Live, type LiveItem } from './live'
 import Prefs, { type PrefsTab } from './Prefs'
 import Settings, { NewProject } from './Settings'
+import { httpsUrl, rovingStep } from './shellUtils'
 import Team from './Team'
-import { Icon, Mark, type IconName } from './ui'
+import { Empty, Icon, Mark, Menu, type IconName } from './ui'
 import Usage from './Usage'
 import Work from './Work'
 
-export interface Live {
-  runId: string
-  events: OfficeEvent[]
-}
+export type { Live } from './live'
+
 type Tab = 'work' | 'team' | 'settings'
+const TABS: readonly Tab[] = ['work', 'team', 'settings']
+const tabId = (t: Tab) => `office-tab-${t}`
+
+/** The saved log of the office's run that is still going, if any. */
+async function snapshot(projectId: string): Promise<LiveItem | null> {
+  try {
+    const runId = await window.office.activeRun(projectId)
+    if (runId) return { projectId, runId, snapshot: await window.office.readRun(projectId, runId) }
+  } catch {
+    // The run shows up with its next event.
+  }
+  return null
+}
+
+/** Next animation frame; a hidden window gets no frames, so it falls back to a timer there. */
+function nextFrame(fn: () => void): () => void {
+  if (document.hidden) {
+    const id = setTimeout(fn, 250)
+    return () => clearTimeout(id)
+  }
+  const id = requestAnimationFrame(fn)
+  return () => cancelAnimationFrame(id)
+}
 
 export default function App() {
   const t = useT()
@@ -26,40 +49,83 @@ export default function App() {
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState('')
   const [ready, setReady] = useState(false)
+  const [loadErr, setLoadErr] = useState('')
+  const [update, setUpdate] = useState<{ version: string; url: string | null } | null>(null)
+  const feed = useRef<ReturnType<typeof createBatcher<LiveItem>> | null>(null)
+  const known = useRef<Project[]>([])
 
   const notify = useCallback((msg: string) => {
     setToast(msg)
     setTimeout(() => setToast((x) => (x === msg ? '' : x)), 3500)
   }, [])
 
-  const reload = useCallback(async () => {
-    const [pv, pj] = await Promise.all([window.office.listProviders(), window.office.listProjects()])
-    setProviders(pv)
-    setProjects(pj)
-    return pj
+  const reload = useCallback(
+    () =>
+      Promise.all([window.office.listProviders(), window.office.listProjects()]).then(([pv, pj]) => {
+        setProviders(pv)
+        setProjects(pj)
+        return pj
+      }),
+    []
+  )
+
+  const show = useCallback((id: string, to: Tab) => {
+    setSel(id)
+    setTab(to)
+    setPrefs(null)
+    setUsage(false)
   }, [])
 
+  const load = useCallback(
+    () =>
+      reload()
+        .then(
+          (pj) => {
+            setLoadErr('')
+            setSel((s) => s ?? pj[0]?.id ?? null)
+            // Re-attach to runs still alive in the main process (e.g. after a reload).
+            return Promise.all(pj.map((p) => snapshot(p.id).then((item) => item && feed.current?.push(item))))
+          },
+          (e) => setLoadErr(errText(e))
+        )
+        .finally(() => setReady(true)),
+    [reload]
+  )
+
   useEffect(() => {
-    void (async () => {
-      const pj = await reload()
-      setSel((s) => s ?? pj[0]?.id ?? null)
-      // Re-attach to runs still alive in the main process (e.g. after a reload).
-      for (const p of pj) {
-        const runId = await window.office.activeRun(p.id)
-        if (runId) {
-          const events = await window.office.readRun(p.id, runId)
-          setLive((l) => ({ ...l, [p.id]: { runId, events } }))
-        }
-      }
-      setReady(true)
-    })()
-    return window.office.onEvent((projectId, runId, ev) =>
-      setLive((l) => {
-        const cur = l[projectId]
-        return { ...l, [projectId]: { runId, events: cur?.runId === runId ? [...cur.events, ev] : [ev] } }
-      })
-    )
-  }, [reload])
+    // Events arrive in bursts while a team works: one state update per frame, not per event.
+    const batcher = createBatcher<LiveItem>((items) => setLive((l) => applyLive(l, items)), nextFrame)
+    feed.current = batcher
+    const off = window.office.onEvent((projectId, runId, ev) => batcher.push({ projectId, runId, ev }))
+    void load()
+    return () => {
+      off()
+      batcher.dispose()
+      feed.current = null
+    }
+  }, [load])
+
+  useEffect(() => {
+    known.current = projects
+  }, [projects])
+
+  // A notification was clicked.
+  useEffect(
+    () =>
+      window.office.onOpenProject((id) => {
+        show(id, 'work')
+        if (!known.current.some((p) => p.id === id)) void reload().catch(() => undefined)
+      }),
+    [show, reload]
+  )
+
+  useEffect(
+    () =>
+      window.office.onUpdate((info) => {
+        if (info.newer && info.latest) setUpdate({ version: info.latest, url: httpsUrl(info.url) })
+      }),
+    []
+  )
 
   const project = projects.find((p) => p.id === sel)
 
@@ -68,9 +134,29 @@ export default function App() {
     setProjects((all) => (all.some((x) => x.id === p.id) ? all.map((x) => (x.id === p.id ? p : x)) : [...all, p]))
   }
 
-  const running = (id: string) => {
-    const last = live[id]?.events.findLast((e) => e.type === 'run')
-    return last?.type === 'run' && last.state === 'running'
+  const deleteProject = async (id: string) => {
+    try {
+      await window.office.deleteProject(id)
+      setLive(({ [id]: _gone, ...rest }) => rest)
+      const pj = await reload()
+      setSel(pj[0]?.id ?? null)
+      setTab('work')
+    } catch (e) {
+      notify(errText(e, t))
+    }
+  }
+
+  const importOffice = async () => {
+    try {
+      const p = await window.office.importProject()
+      if (!p) return
+      setProjects((all) => [...all.filter((x) => x.id !== p.id), p])
+      // Its workspace folder may not exist on this computer: show where to change it.
+      show(p.id, 'settings')
+      notify(t.shell.imported(p.name))
+    } catch (e) {
+      notify(errText(e, t))
+    }
   }
 
   const tabs: [Tab, string, IconName][] = [
@@ -78,6 +164,86 @@ export default function App() {
     ['team', t.nav.team, 'users'],
     ['settings', t.nav.officeSettings, 'sliders']
   ]
+
+  let view: { title?: string; head?: ReactNode; className: string; panel?: boolean; body: ReactNode }
+  if (usage) {
+    view = {
+      title: t.nav.usage,
+      className: '',
+      body: (
+        <Usage
+          providers={providers}
+          projects={projects}
+          openProviders={() => {
+            setUsage(false)
+            setPrefs('providers')
+          }}
+          openCaps={() => {
+            setUsage(false)
+            setPrefs('general')
+          }}
+        />
+      )
+    }
+  } else if (prefs) {
+    view = { title: t.prefs.title, className: 'fixed', body: <Prefs tab={prefs} onTab={setPrefs} providers={providers} onProviders={reload} notify={notify} /> }
+  } else if (project) {
+    view = {
+      title: project.name,
+      className: tab === 'settings' ? '' : 'fixed',
+      panel: true,
+      head: (
+        <div
+          className="tabs"
+          role="tablist"
+          aria-label={project.name}
+          onKeyDown={(e) => {
+            const to = rovingStep(TABS, tab, e.key, 'x')
+            if (!to) return
+            e.preventDefault()
+            setTab(to)
+            document.getElementById(tabId(to))?.focus()
+          }}
+        >
+          {tabs.map(([id, label, icon]) => (
+            <button
+              key={id}
+              id={tabId(id)}
+              role="tab"
+              aria-selected={tab === id}
+              aria-controls="office-panel"
+              tabIndex={tab === id ? 0 : -1}
+              className={`tab ${tab === id ? 'on' : ''}`}
+              onClick={() => setTab(id)}
+            >
+              <Icon name={icon} size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
+      ),
+      body: (
+        <>
+          {tab === 'work' && <Work key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} onSave={saveProject} />}
+          {tab === 'team' && <Team key={project.id} project={project} providers={providers} live={live[project.id]} onSave={saveProject} notify={notify} />}
+          {tab === 'settings' && <Settings key={project.id} project={project} onSave={saveProject} notify={notify} onDelete={() => deleteProject(project.id)} />}
+        </>
+      )
+    }
+  } else {
+    view = {
+      className: '',
+      body: loadErr ? (
+        <Empty icon="alert" title={t.shell.loadFailed} body={loadErr}>
+          <button className="btn primary" onClick={() => void load()}>
+            <Icon name="refresh" size={14} /> {t.shell.retry}
+          </button>
+        </Empty>
+      ) : (
+        ready && <Welcome providers={providers} onProviders={() => setPrefs('providers')} onCreate={() => setCreating(true)} />
+      )
+    }
+  }
 
   return (
     <div className="app">
@@ -88,30 +254,38 @@ export default function App() {
         </div>
         <div className="rail-head">
           {t.nav.offices}
-          <button className="btn quiet icon sm" onClick={() => setCreating(true)} aria-label={t.nav.newOffice} title={t.nav.newOffice}>
-            <Icon name="plus" />
-          </button>
+          <Menu
+            label={t.shell.addOffice}
+            icon="plus"
+            items={[
+              { label: t.nav.newOffice, icon: 'plus', onSelect: () => setCreating(true) },
+              { label: t.shell.importOffice, icon: 'download', onSelect: () => void importOffice() }
+            ]}
+          />
         </div>
         <div className="rail-list">
-          {projects.map((p) => (
-            <button
-              key={p.id}
-              className={`rail-item ${!prefs && !usage && sel === p.id ? 'on' : ''}`}
-              onClick={() => {
-                setSel(p.id)
-                setPrefs(null)
-                setUsage(false)
-              }}
-            >
-              <span className="label">{p.name}</span>
-              {running(p.id) ? <span className="dot live" /> : <span className="meta">{p.agents.length}</span>}
-            </button>
-          ))}
-          {ready && !projects.length && <p className="rail-empty">{t.nav.noOffices}</p>}
+          {projects.map((p) => {
+            const on = !prefs && !usage && sel === p.id
+            const s = officeState(live[p.id])
+            return (
+              <button key={p.id} className={`rail-item ${on ? 'on' : ''}`} aria-current={on ? 'page' : undefined} onClick={() => show(p.id, tab)}>
+                <span className="label">{p.name}</span>
+                {s.waiting > 0 ? (
+                  <span className="dot warn" role="img" aria-label={t.shell.waiting(s.waiting)} title={t.shell.waiting(s.waiting)} />
+                ) : s.running ? (
+                  <span className="dot live" role="img" aria-label={t.work.running} title={t.work.running} />
+                ) : (
+                  <span className="meta">{p.agents.length}</span>
+                )}
+              </button>
+            )
+          })}
+          {ready && !projects.length && !loadErr && <p className="rail-empty">{t.nav.noOffices}</p>}
         </div>
         <div className="rail-foot">
           <button
             className={`rail-item ${usage ? 'on' : ''}`}
+            aria-current={usage ? 'page' : undefined}
             onClick={() => {
               setUsage(true)
               setPrefs(null)
@@ -122,6 +296,7 @@ export default function App() {
           </button>
           <button
             className={`rail-item ${prefs ? 'on' : ''}`}
+            aria-current={prefs ? 'page' : undefined}
             onClick={() => {
               setPrefs('providers')
               setUsage(false)
@@ -134,69 +309,30 @@ export default function App() {
       </nav>
 
       <main className="main">
-        {usage ? (
-          <>
-            <header className="topbar drag">
-              <h1>{t.nav.usage}</h1>
-            </header>
-            <div className="content">
-              <Usage
-                providers={providers}
-                projects={projects}
-                openProviders={() => {
-                  setUsage(false)
-                  setPrefs('providers')
-                }}
-              />
-            </div>
-          </>
-        ) : prefs ? (
-          <>
-            <header className="topbar drag">
-              <h1>{t.prefs.title}</h1>
-            </header>
-            <div className="content fixed">
-              <Prefs tab={prefs} onTab={setPrefs} providers={providers} onProviders={reload} notify={notify} />
-            </div>
-          </>
-        ) : project ? (
-          <>
-            <header className="topbar drag">
-              <h1>{project.name}</h1>
-              <div className="tabs" role="tablist">
-                {tabs.map(([id, label, icon]) => (
-                  <button key={id} role="tab" aria-selected={tab === id} className={`tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>
-                    <Icon name={icon} size={14} />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </header>
-            <div className={`content ${tab === 'settings' ? '' : 'fixed'}`}>
-              {tab === 'work' && <Work key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} onSave={saveProject} />}
-              {tab === 'team' && <Team key={project.id} project={project} providers={providers} live={live[project.id]} onSave={saveProject} notify={notify} />}
-              {tab === 'settings' && (
-                <Settings
-                  key={project.id}
-                  project={project}
-                  onSave={saveProject}
-                  notify={notify}
-                  onDelete={async () => {
-                    await window.office.deleteProject(project.id)
-                    const pj = await reload()
-                    setSel(pj[0]?.id ?? null)
-                    setTab('work')
-                  }}
-                />
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <header className="topbar drag" />
-            <div className="content">{ready && <Welcome providers={providers} onProviders={() => setPrefs('providers')} onCreate={() => setCreating(true)} />}</div>
-          </>
+        <header className="topbar drag">
+          {view.title && <h1>{view.title}</h1>}
+          {view.head}
+        </header>
+        {update && (
+          <div className="banner" role="status">
+            <Icon name="download" size={14} />
+            <span className="spacer">{t.shell.updateAvailable(update.version)}</span>
+            {update.url && (
+              <a className="btn sm" href={update.url} target="_blank" rel="noreferrer">
+                {t.shell.download} <Icon name="external" size={12} />
+              </a>
+            )}
+            <button className="btn quiet icon sm" onClick={() => setUpdate(null)} aria-label={t.shell.dismiss} title={t.shell.dismiss}>
+              <Icon name="x" size={14} />
+            </button>
+          </div>
         )}
+        <div
+          className={`content ${view.className}`}
+          {...(view.panel ? { id: 'office-panel', role: 'tabpanel', 'aria-labelledby': tabId(tab) } : {})}
+        >
+          {view.body}
+        </div>
       </main>
 
       {creating && (
@@ -209,9 +345,7 @@ export default function App() {
           }}
           onCreate={async (p) => {
             await saveProject(p)
-            setSel(p.id)
-            setPrefs(null)
-            setTab('team')
+            show(p.id, 'team')
             setCreating(false)
           }}
         />

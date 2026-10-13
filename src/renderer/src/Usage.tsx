@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Balance, Project, Provider, QuotaUse, UsageRow, UsageStats } from '../../shared/types'
+import type { Balance, CapUse, Project, Provider, QuotaUse, UsageRow, UsageStats } from '../../shared/types'
 import { errText, useT } from './i18n'
 import { Logo } from './Providers'
+import { meter } from './shellUtils'
 import { Empty, Icon, tokens, usd } from './ui'
 
 type Range = 'today' | 'week' | 'month30' | 'month'
@@ -22,18 +23,27 @@ interface Props {
   providers: Provider[]
   projects: Project[]
   openProviders(): void
+  openCaps(): void
 }
 
-export default function Usage({ providers, projects, openProviders }: Props) {
+export default function Usage({ providers, projects, openProviders, openCaps }: Props) {
   const t = useT()
   const u = t.usage
   const [range, setRange] = useState<Range>('week')
   const [office, setOffice] = useState('')
-  const [data, setData] = useState<{ stats: UsageStats; quotas: Record<string, QuotaUse | null> } | null>(null)
+  const [data, setData] = useState<{ stats: UsageStats; quotas: Record<string, QuotaUse | null>; caps?: CapUse } | null>(null)
+  const [err, setErr] = useState('')
 
   useEffect(() => {
     let live = true
-    void window.office.usageStats(rangeStart(range), Date.now() + 1, office || undefined).then((d) => live && setData(d))
+    window.office.usageStats(rangeStart(range), Date.now() + 1, office || undefined).then(
+      (d) => {
+        if (!live) return
+        setData(d)
+        setErr('')
+      },
+      (e) => live && setErr(errText(e))
+    )
     return () => {
       live = false
     }
@@ -64,6 +74,10 @@ export default function Usage({ providers, projects, openProviders }: Props) {
           </div>
         </div>
       </div>
+
+      {err && <div className="note danger" role="alert">{err}</div>}
+      {!data && !err && <p className="faint small" role="status">{t.shell.loading}</p>}
+      {data?.caps && <CapsCard caps={data.caps} onEdit={openCaps} />}
 
       {s && (
         <>
@@ -156,6 +170,48 @@ export default function Usage({ providers, projects, openProviders }: Props) {
   )
 }
 
+/** App-wide spending caps (Settings → General): today and this month against their caps. */
+export function CapsCard({ caps, onEdit }: { caps: CapUse; onEdit(): void }) {
+  const t = useT()
+  const s = t.shell
+  const rows = (
+    [
+      ['day', s.capToday, caps.day, caps.dailyCapUsd, s.capFullDay],
+      ['month', s.capMonth, caps.month, caps.monthlyCapUsd, s.capFullMonth]
+    ] as const
+  ).filter((r) => r[3] > 0)
+  if (!rows.length) return null
+  return (
+    <section className="panel caps" aria-label={s.caps}>
+      <div className="caps-head">
+        <h3>{s.caps}</h3>
+        <span className="faint small spacer">{s.capsAll}</span>
+        <button className="btn quiet sm" onClick={onEdit}>
+          <Icon name="edit" size={13} /> {s.editCaps}
+        </button>
+      </div>
+      <div className="caps-rows">
+        {rows.map(([id, label, used, cap, full]) => {
+          const m = meter(used, cap)
+          return (
+            <div key={id} className="quota">
+              <div className="row small">
+                <span className="muted">{label}</span>
+                <span className="spacer" />
+                <span className="num">{s.capUsed(money(used), usd(cap))}</span>
+              </div>
+              <div className={`meter ${m.level}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(m.pct)} aria-label={`${s.caps}: ${label}`}>
+                <span style={{ width: `${m.pct}%` }} />
+              </div>
+              {m.level && <small className={m.level === 'full' ? 'danger' : 'warn'}>{m.level === 'full' ? full : s.capHigh}</small>}
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 /** One series (spend per day): amber columns, recessive grid, tooltip on hover/focus. */
 function DailyChart({ days }: { days: UsageStats['byDay'] }) {
   const t = useT()
@@ -242,7 +298,7 @@ function ProviderCard({ provider: p, rows, quota }: { provider: Provider; rows: 
     setBusy(false)
   }
 
-  const pct = quota ? Math.min(100, (quota.used / quota.amount) * 100) : 0
+  const { pct, level } = quota ? meter(quota.used, quota.amount) : { pct: 0, level: '' }
   const fmtQuota = (n: number) => (quota?.unit === 'usd' ? money(n) : quota?.unit === 'tokens' ? tokens(n) : Math.round(n).toLocaleString())
   const total = useMemo(() => rows.reduce((n, r) => n + r.usd, 0), [rows])
 
@@ -283,10 +339,10 @@ function ProviderCard({ provider: p, rows, quota }: { provider: Provider; rows: 
             <span className="spacer" />
             <span className="num">{fmtQuota(quota.used)} / {fmtQuota(quota.amount)}</span>
           </div>
-          <div className={`meter ${pct >= 100 ? 'full' : pct >= 80 ? 'high' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={u.quota(t.providers.windows[quota.window])}>
+          <div className={`meter ${level}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={u.quota(t.providers.windows[quota.window])}>
             <span style={{ width: `${pct}%` }} />
           </div>
-          {pct >= 80 && <small className={pct >= 100 ? 'danger' : 'warn'}>{pct >= 100 ? u.quotaFull : u.quotaHigh}</small>}
+          {level && <small className={level === 'full' ? 'danger' : 'warn'}>{level === 'full' ? u.quotaFull : u.quotaHigh}</small>}
         </div>
       )}
       {rows.length > 0 && (

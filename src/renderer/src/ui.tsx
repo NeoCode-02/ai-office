@@ -1,6 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import type { AgentStatus } from '../../shared/types'
 import { useT } from './i18n'
+import { createLayers, trapStep } from './layers'
+import { rovingStep } from './shellUtils'
 
 const PATHS = {
   plus: 'M12 5v14M5 12h14',
@@ -99,12 +101,52 @@ export function Avatar({ name, seed, size = 28, status }: { name: string; seed?:
 
 export function Modal({ title, onClose, children, footer, width }: { title: string; onClose(): void; children: ReactNode; footer?: ReactNode; width?: number }) {
   const t = useT()
-  useEscape(onClose)
+  const ref = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  // Read while rendering: an autoFocus field inside takes focus before any effect runs.
+  const [opener] = useState(() => (typeof document === 'undefined' ? null : document.activeElement))
+  useLayer(onClose, ref, 2)
+
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    if (!node.contains(document.activeElement)) {
+      const body = node.querySelector('.modal-body')
+      ;((body && focusables(body)[0]) ?? focusables(node)[0] ?? node).focus()
+    }
+    return () => {
+      // Still in the page = React re-running effects (StrictMode), not a close.
+      if (node.isConnected) return
+      const active = document.activeElement
+      if (active && active !== document.body) return
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
+    }
+  }, [opener])
+
+  const trap = (e: KeyboardEvent<HTMLDivElement>) => {
+    const node = ref.current
+    if (e.key !== 'Tab' || e.defaultPrevented || !node) return
+    const items = focusables(node)
+    const next = trapStep(items.indexOf(document.activeElement as HTMLElement), items.length, e.shiftKey)
+    if (next === null) return
+    e.preventDefault()
+    ;(items[next] ?? node).focus()
+  }
+
   return (
     <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal aria-label={title} style={width ? { width: `min(${width}px, 100%)` } : undefined}>
+      <div
+        ref={ref}
+        className="modal"
+        role="dialog"
+        aria-modal
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={trap}
+        style={width ? { width: `min(${width}px, 100%)` } : undefined}
+      >
         <div className="modal-head">
-          <h3>{title}</h3>
+          <h3 id={titleId}>{title}</h3>
           <button className="btn quiet icon sm" onClick={onClose} aria-label={t.common.close}>
             <Icon name="x" />
           </button>
@@ -117,11 +159,12 @@ export function Modal({ title, onClose, children, footer, width }: { title: stri
 }
 
 /** Right-hand slide-over panel, positioned inside the nearest `position: relative` container. */
-export function Sheet({ head, onClose, children }: { head: ReactNode; onClose(): void; children: ReactNode }) {
+export function Sheet({ head, onClose, children, label }: { head: ReactNode; onClose(): void; children: ReactNode; label?: string }) {
   const t = useT()
-  useEscape(onClose)
+  const ref = useRef<HTMLElement>(null)
+  useLayer(onClose, ref, 1)
   return (
-    <aside className="sheet" role="dialog" aria-modal={false}>
+    <aside ref={ref} className="sheet" role="dialog" aria-modal={false} aria-label={label}>
       <div className="sheet-head">
         {head}
         <button className="btn quiet icon sm" onClick={onClose} aria-label={t.common.close}>
@@ -133,12 +176,123 @@ export function Sheet({ head, onClose, children }: { head: ReactNode; onClose():
   )
 }
 
-function useEscape(fn: () => void) {
+export interface MenuItem {
+  label: string
+  icon?: IconName
+  onSelect(): void
+}
+
+/** A button that opens a short list of actions (arrow keys move, Escape or a click outside closes). */
+export function Menu({ label, icon = 'more', items }: { label: string; icon?: IconName; items: MenuItem[] }) {
+  const [open, setOpen] = useState(false)
+  const id = useId()
+  const wrap = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  const close = useCallback((refocus: boolean) => {
+    setOpen(false)
+    if (refocus) button.current?.focus()
+  }, [])
+  return (
+    <div className="menu-wrap" ref={wrap}>
+      <button
+        ref={button}
+        type="button"
+        className="btn quiet icon sm"
+        aria-label={label}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+          e.preventDefault()
+          setOpen(true)
+        }}
+      >
+        <Icon name={icon} />
+      </button>
+      {open && <MenuList id={id} label={label} items={items} wrap={wrap} onClose={close} />}
+    </div>
+  )
+}
+
+function MenuList({ id, label, items, wrap, onClose }: { id: string; label: string; items: MenuItem[]; wrap: RefObject<HTMLDivElement | null>; onClose(refocus: boolean): void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const escape = useCallback(() => onClose(true), [onClose])
+  useLayer(escape, ref, 3)
+
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && fn()
-    window.addEventListener('keydown', k)
-    return () => window.removeEventListener('keydown', k)
-  }, [fn])
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+    const outside = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) onClose(false)
+    }
+    document.addEventListener('pointerdown', outside, true)
+    return () => document.removeEventListener('pointerdown', outside, true)
+  }, [wrap, onClose])
+
+  const move = (e: KeyboardEvent<HTMLDivElement>) => {
+    // Back on the button, so Tab carries on from there once the list is gone.
+    if (e.key === 'Tab') return onClose(true)
+    const all = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
+    const to = rovingStep(all, document.activeElement as HTMLElement, e.key, 'y')
+    if (!to) return
+    e.preventDefault()
+    to.focus()
+  }
+
+  return (
+    <div ref={ref} id={id} className="menu" role="menu" aria-label={label} onKeyDown={move}>
+      {items.map((it) => (
+        <button
+          key={it.label}
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          onClick={() => {
+            onClose(true)
+            it.onSelect()
+          }}
+        >
+          {it.icon && <Icon name={it.icon} size={14} />}
+          {it.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const layers = createLayers()
+
+function onEscape(e: globalThis.KeyboardEvent) {
+  if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
+  const top = layers.top()
+  if (!top) return
+  e.preventDefault()
+  top.close()
+}
+
+/** Registers an open menu, modal or sheet; Escape closes only the top-most one. */
+function useLayer(close: () => void, ref: RefObject<Element | null>, level: number) {
+  const latest = useRef(close)
+  useEffect(() => {
+    latest.current = close
+  })
+  useEffect(() => {
+    if (!layers.size) window.addEventListener('keydown', onEscape)
+    const remove = layers.add({ level, el: () => ref.current, close: () => latest.current() })
+    return () => {
+      remove()
+      if (!layers.size) window.removeEventListener('keydown', onEscape)
+    }
+  }, [ref, level])
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+
+/** Elements Tab can reach inside `root`, in document order (hidden ones and closed <details> skipped). */
+function focusables(root: Element): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0)
 }
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {

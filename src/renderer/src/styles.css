@@ -455,3 +455,24 @@ li:hover > .node-wrap > .node-add, .node-add:focus-visible { opacity: 1; transfo
 .panel > .table:first-child th { border-top: 0; }
 .table .r { text-align: right; }
 .usage-foot { margin-top: 28px; max-width: 80ch; line-height: 1.5; }
+
+/* App shell: menus, update banner, preferences, caps */
+.menu-wrap { position: relative; display: inline-flex; }
+.menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: calc(var(--z-panel) + 5); min-width: 188px; padding: 4px; display: flex; flex-direction: column; gap: 1px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); animation: rise 0.14s var(--ease); }
+.menu [role='menuitem'] { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border: 0; border-radius: 7px; background: none; color: var(--text); font-size: 13px; font-weight: 500; text-align: left; white-space: nowrap; }
+.menu [role='menuitem'] svg { color: var(--text-2); flex-shrink: 0; }
+.menu [role='menuitem']:hover, .menu [role='menuitem']:focus-visible { background: var(--raised); }
+.menu [role='menuitem']:focus-visible { outline-offset: -2px; }
+.modal:focus { outline: none; }
+.banner { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 7px 14px 7px 24px; border-bottom: 1px solid var(--line); background: var(--accent-soft); color: var(--accent-text); font-size: 13px; font-weight: 550; }
+.banner .btn { color: var(--text); }
+.banner .btn.quiet { color: var(--accent-text); }
+.seg button.seg-icon { display: inline-flex; align-items: center; gap: 6px; }
+.seg button:focus-visible { outline-offset: -2px; }
+.danger-text { color: var(--danger); }
+.caps { margin-bottom: 14px; }
+.caps-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px 18px; }
+.caps-head h3 { font-size: 14px; }
+.caps-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.input[aria-invalid='true'] { border-color: var(--danger); }
+.input[aria-invalid='true']:focus { box-shadow: 0 0 0 3px var(--danger-soft); }

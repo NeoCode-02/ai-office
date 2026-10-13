@@ -4,6 +4,7 @@ import type { Billing, Provider } from '../../shared/types'
 import { errText, useT } from './i18n'
 import { uid } from './roles'
 import { BillingFields, fromRows, PriceTable, toRow, type PriceRow } from './Pricing'
+import { errCode } from './shellUtils'
 import { ConfirmButton, Empty, Field, hue, Icon, Modal, usd } from './ui'
 
 const BRAND: Record<string, string> = {
@@ -123,6 +124,8 @@ function ProviderModal({ initial, onClose, onSaved, notify }: { initial: Provide
   const [busy, setBusy] = useState(false)
   const [billing, setBilling] = useState<Billing>(initial?.billing ?? { mode: 'payg' })
   const [rows, setRows] = useState<PriceRow[]>([])
+  // Who still uses this provider, after a first delete was refused.
+  const [inUse, setInUse] = useState('')
 
   useEffect(() => {
     void window.office.presets().then(setPresets)
@@ -175,6 +178,19 @@ function ProviderModal({ initial, onClose, onSaved, notify }: { initial: Provide
     }
   }
 
+  const remove = async (force: boolean) => {
+    if (!initial) return
+    setBusy(true)
+    try {
+      await window.office.deleteProvider(initial.id, force)
+      onSaved()
+    } catch (e) {
+      if (!force && errCode(e) === 'E_PROVIDER_IN_USE') setInUse(errText(e, t))
+      else setErr(errText(e, t))
+      setBusy(false)
+    }
+  }
+
   const showForm = Boolean(initial || preset || custom)
 
   return (
@@ -186,14 +202,14 @@ function ProviderModal({ initial, onClose, onSaved, notify }: { initial: Provide
         <>
           {initial && (
             <span className="spacer">
-              <ConfirmButton
-                onConfirm={async () => {
-                  await window.office.deleteProvider(initial.id)
-                  onSaved()
-                }}
-              >
-                {t.common.delete}
-              </ConfirmButton>
+              {inUse ? (
+                <button type="button" className="btn danger armed" onClick={() => void remove(true)} disabled={busy}>
+                  <Icon name="trash" size={14} />
+                  {t.shell.deleteAnyway}
+                </button>
+              ) : (
+                <ConfirmButton onConfirm={() => void remove(false)}>{t.common.delete}</ConfirmButton>
+              )}
             </span>
           )}
           <button className="btn" onClick={onClose}>{t.common.cancel}</button>
@@ -261,6 +277,12 @@ function ProviderModal({ initial, onClose, onSaved, notify }: { initial: Provide
               </details>
             )}
           </>
+        )}
+        {inUse && (
+          <div className="note danger row" role="alert">
+            <Icon name="alert" size={14} />
+            <span className="spacer">{inUse}</span>
+          </div>
         )}
         {err && <div className="note danger" role="alert">{err}</div>}
       </div>

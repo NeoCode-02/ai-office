@@ -12,16 +12,26 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
   const [editMcp, setEditMcp] = useState<McpServer | 'new' | null>(null)
   const [newSkill, setNewSkill] = useState(false)
   const [testing, setTesting] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
 
   const [tick, setTick] = useState(0)
   const reload = () => setTick((n) => n + 1)
   useEffect(() => {
-    void Promise.all([window.office.listMcp(), window.office.listSkills(), window.office.listPlugins()]).then(([m, s, p]) => {
-      setMcp(m)
-      setSkills(s)
-      setPlugins(p)
-    })
-  }, [tick])
+    let live = true
+    Promise.all([window.office.listMcp(), window.office.listSkills(), window.office.listPlugins()]).then(
+      ([m, s, p]) => {
+        if (!live) return
+        setMcp(m)
+        setSkills(s)
+        setPlugins(p)
+        setLoaded(true)
+      },
+      (e) => live && notify(errText(e))
+    )
+    return () => {
+      live = false
+    }
+  }, [tick, notify])
 
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     try {
@@ -81,7 +91,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
           </button>
         </div>
         <div className="list">
-          {mcp.length === 0 && <div className="list-empty">{t.ext.noneMcp}</div>}
+          {mcp.length === 0 && <div className="list-empty">{loaded ? t.ext.noneMcp : t.shell.loading}</div>}
           {mcp.map((m) => (
             <div key={m.id} className="list-row">
               <Icon name="plug" />
@@ -120,6 +130,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
           </div>
         </div>
         <div className="list">
+          {skills.length === 0 && <div className="list-empty">{loaded ? t.ext.noneSkills : t.shell.loading}</div>}
           {skills.map((s) => (
             <div key={s.name} className="list-row">
               <Icon name="book" />
@@ -131,9 +142,9 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
                 <div className="muted small ellipsis" title={s.description}>{s.description}</div>
               </div>
               {s.source === 'user' && (
-                <button className="btn quiet icon sm" aria-label={`${t.common.delete} ${s.name}`} title={t.common.delete} onClick={() => run(() => window.office.deleteSkill(s.name))}>
-                  <Icon name="trash" size={14} />
-                </button>
+                <ConfirmButton className="sm" onConfirm={() => run(() => window.office.deleteSkill(s.name))}>
+                  {t.common.delete}
+                </ConfirmButton>
               )}
               <Switch on={s.enabled} label={s.name} onChange={(on) => run(() => window.office.setSkillEnabled(s.name, on))} />
             </div>
@@ -152,7 +163,7 @@ export default function Extensions({ notify }: { notify(t: string): void }) {
           </button>
         </div>
         <div className="list">
-          {plugins.length === 0 && <div className="list-empty">{t.ext.nonePlugins}</div>}
+          {plugins.length === 0 && <div className="list-empty">{loaded ? t.ext.nonePlugins : t.shell.loading}</div>}
           {plugins.map((p) => (
             <div key={p.name} className="list-row">
               <Icon name="puzzle" />
@@ -189,20 +200,29 @@ function McpModal({ initial, onClose, onSaved }: { initial: McpServer | null; on
   const [url, setUrl] = useState(initial?.url ?? '')
   const [secrets, setSecrets] = useState('')
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const save = async () => {
-    if (!name.trim()) return setErr(t.providers.errName)
-    if (transport === 'http' && !/^https?:\/\//.test(url)) return setErr(t.providers.errUrl)
-    if (transport === 'stdio' && !command.trim()) return setErr(t.ext.command)
+  const act = async (fn: () => Promise<void>) => {
+    setBusy(true)
     try {
-      await window.office.saveMcp(
-        { id: initial?.id ?? uid(), name: name.trim(), transport, command: command.trim(), args: args.split('\n').map((a) => a.trim()).filter(Boolean), url: url.trim(), enabled: initial?.enabled ?? true },
-        secrets
-      )
+      await fn()
       onSaved()
     } catch (e) {
       setErr(errText(e, t))
+      setBusy(false)
     }
+  }
+
+  const save = () => {
+    if (!name.trim()) return setErr(t.providers.errName)
+    if (transport === 'http' && !/^https?:\/\//.test(url)) return setErr(t.providers.errUrl)
+    if (transport === 'stdio' && !command.trim()) return setErr(t.shell.errCommand)
+    void act(() =>
+      window.office.saveMcp(
+        { id: initial?.id ?? uid(), name: name.trim(), transport, command: command.trim(), args: args.split('\n').map((a) => a.trim()).filter(Boolean), url: url.trim(), enabled: initial?.enabled ?? true },
+        secrets
+      )
+    )
   }
 
   return (
@@ -214,11 +234,11 @@ function McpModal({ initial, onClose, onSaved }: { initial: McpServer | null; on
         <>
           {initial && (
             <span className="spacer">
-              <ConfirmButton onConfirm={async () => { await window.office.deleteMcp(initial.id); onSaved() }}>{t.common.delete}</ConfirmButton>
+              <ConfirmButton onConfirm={() => void act(() => window.office.deleteMcp(initial.id))}>{t.common.delete}</ConfirmButton>
             </span>
           )}
           <button className="btn" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn primary" onClick={save}>{t.common.save}</button>
+          <button className="btn primary" onClick={save} disabled={busy}>{busy ? t.common.saving : t.common.save}</button>
         </>
       }
     >
@@ -227,9 +247,9 @@ function McpModal({ initial, onClose, onSaved }: { initial: McpServer | null; on
           <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="GitHub" />
         </Field>
         <Field label={t.ext.transport}>
-          <div className="seg">
-            <button className={transport === 'stdio' ? 'on' : ''} onClick={() => setTransport('stdio')}>{t.ext.stdio}</button>
-            <button className={transport === 'http' ? 'on' : ''} onClick={() => setTransport('http')}>{t.ext.http}</button>
+          <div className="seg" role="group" aria-label={t.ext.transport}>
+            <button type="button" className={transport === 'stdio' ? 'on' : ''} aria-pressed={transport === 'stdio'} onClick={() => setTransport('stdio')}>{t.ext.stdio}</button>
+            <button type="button" className={transport === 'http' ? 'on' : ''} aria-pressed={transport === 'http'} onClick={() => setTransport('http')}>{t.ext.http}</button>
           </div>
         </Field>
         {transport === 'stdio' ? (
@@ -260,7 +280,20 @@ function SkillModal({ onClose, onSaved }: { onClose(): void; onSaved(): void }) 
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
   const [body, setBody] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const valid = name.trim() && desc.trim() && body.trim()
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      await window.office.createSkill(name.trim(), desc.trim(), body)
+      onSaved()
+    } catch (e) {
+      setErr(errText(e, t))
+      setBusy(false)
+    }
+  }
   return (
     <Modal
       title={t.ext.newSkill}
@@ -269,7 +302,7 @@ function SkillModal({ onClose, onSaved }: { onClose(): void; onSaved(): void }) 
       footer={
         <>
           <button className="btn" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn primary" disabled={!valid} onClick={async () => { await window.office.createSkill(name, desc, body); onSaved() }}>{t.common.save}</button>
+          <button className="btn primary" disabled={!valid || busy} onClick={() => void save()}>{busy ? t.common.saving : t.common.save}</button>
         </>
       }
     >
@@ -283,6 +316,7 @@ function SkillModal({ onClose, onSaved }: { onClose(): void; onSaved(): void }) 
         <Field label={t.ext.skillBody}>
           <textarea className="textarea mono" rows={10} value={body} onChange={(e) => setBody(e.target.value)} placeholder={'# Release checklist\n1. …'} />
         </Field>
+        {err && <div className="note danger" role="alert">{err}</div>}
       </div>
     </Modal>
   )
