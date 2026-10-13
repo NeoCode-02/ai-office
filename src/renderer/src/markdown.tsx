@@ -281,7 +281,8 @@ const RULES: Rule[] = [
     }
   },
   {
-    re: /\[([^\]\n]+)\]\([ \t]*([^\s()]*(?:\([^\s()]*\)[^\s()]*)*)[ \t]*\)/,
+    // Link text can't hold "[": from every "[" the scan stops at the next one, so "[[[[…" stays linear.
+    re: /\[([^[\]\n]+)\]\([ \t]*([^\s()]*(?:\([^\s()]*\)[^\s()]*)*)[ \t]*\)/,
     link: true,
     make: (m, key, depth) => {
       const href = safeUrl(m[2])

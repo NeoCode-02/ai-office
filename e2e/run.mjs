@@ -76,6 +76,10 @@ const devtools = await new Promise((resolve, reject) => {
     }
   })
   app.on('exit', (code) => reject(new Error(`The app exited (${code}):\n${appLog}`)))
+}).catch((e) => {
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=E2E start::${e.message.replace(/%/g, '%25').replace(/\r/g, '').replace(/\n/g, '%0A')}`)
+  server.close()
+  throw e
 })
 
 const port = new URL(devtools).port
@@ -215,6 +219,12 @@ try {
 } catch (e) {
   failed = true
   console.error(`\nFAILED: ${e.message}`)
+  // On GitHub the message and the app's last lines become annotations, readable without the full log.
+  if (process.env.GITHUB_ACTIONS) {
+    const esc = (s) => s.replace(/%/g, '%25').replace(/\r/g, '').replace(/\n/g, '%0A')
+    console.log(`::error title=E2E::${esc(e.message)}`)
+    console.log(`::error title=App log::${esc(appLog.split('\n').slice(-25).join('\n'))}`)
+  }
   const shot = await cdp('Page.captureScreenshot', { format: 'png' }).catch(() => null)
   if (shot?.result?.data) {
     fs.writeFileSync(path.join(root, 'e2e', 'failure.png'), Buffer.from(shot.result.data, 'base64'))

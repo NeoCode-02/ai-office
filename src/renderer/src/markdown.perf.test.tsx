@@ -3,7 +3,10 @@ import { expect, it } from 'vitest'
 import { Markdown } from './markdown'
 
 it('renders hostile markdown in reasonable time', () => {
-  const inputs = ['*'.repeat(30000), '['.repeat(30000), '`'.repeat(30000), '_a'.repeat(20000), '[a]('.repeat(10000), '**a'.repeat(15000), '| a '.repeat(5000) + '\n|---|\n', '> '.repeat(20000), '- '.repeat(20000), 'http://a.b/' + '('.repeat(20000), '~~'.repeat(20000), '<'.repeat(30000)]
+  // Big enough that anything quadratic takes seconds (80K "[" took 2.2 s before the link rule was fixed).
+  const n = 80_000
+  const inputs = ['*', '[', '`', '_a', '[a](', '**a', '> ', '- ', '~~', '<', '[a', '](x'].map((s) => s.repeat(n / s.length))
+  inputs.push(`| a ${'| a '.repeat(5000)}\n|---|\n`, `http://a.b/${'('.repeat(n)}`)
   for (const text of inputs) {
     const t = performance.now()
     renderToStaticMarkup(<Markdown text={text} />)
