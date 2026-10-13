@@ -1,9 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import type { OfficeEvent, Project, Provider } from '../shared/types'
 import { Office } from './office'
 import { listModels, PRESETS } from './providers'
 import { createStore } from './store'
+
+// Separate data folder for tests / portable use.
+if (process.env.AI_OFFICE_DATA) app.setPath('userData', process.env.AI_OFFICE_DATA)
 
 const store = createStore(path.join(app.getPath('userData'), 'data'), {
   encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
@@ -33,7 +37,9 @@ function createWindow() {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  win.webContents.on('will-navigate', (e) => e.preventDefault())
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== win?.webContents.getURL()) e.preventDefault()
+  })
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
@@ -84,7 +90,9 @@ const handlers = {
   start(projectId: string, goal: string) {
     offices.get(projectId)?.stop('Yangi vazifa boshlandi')
     const p = project(projectId)
-    if (!p.workspaceDir) throw new Error('Avval ish papkasini tanlang')
+    if (!p.workspaceDir || !fs.statSync(p.workspaceDir, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error('Ish papkasi topilmadi — sozlamalarda mavjud papkani tanlang')
+    }
     let runId = ''
     const office = new Office(p, {
       conn: (id) => store.conn(id),

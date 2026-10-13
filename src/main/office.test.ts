@@ -103,6 +103,21 @@ describe('office', () => {
     await finished()
     expect(reply).toMatch(/berilmagan/)
   })
+
+  it('owner can continue a finished run', async () => {
+    const seen: string[] = []
+    const { office, finished } = setup([agent('ceo', null)], {
+      ceo: (input) => {
+        if (input) seen.push(input)
+        return { text: input ? 'ok' : '' }
+      }
+    })
+    office.start('first')
+    await finished()
+    office.post('second')
+    await finished()
+    expect(seen).toEqual(['[From the owner] first', '[From the owner] second'])
+  })
 })
 
 describe('org + sandbox', () => {

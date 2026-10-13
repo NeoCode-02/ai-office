@@ -226,7 +226,7 @@ export class Office {
           report: (summary) => this.report(summary),
           approve: (command) => this.approve(a, command)
         })
-        if (call.name !== 'message') {
+        if (call.name !== 'message' && call.name !== 'report_to_user') {
           this.emit({ type: 'tool', id: randomUUID(), at: Date.now(), agentId: a.id, name: call.name, summary: summarize(call.input), ok: !r.isError })
         }
         results.push({ id: call.id, content: r.content, isError: r.isError })
