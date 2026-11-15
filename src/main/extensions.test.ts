@@ -89,6 +89,14 @@ describe('mcp client', () => {
     pool.closeAll()
   })
 
+  it('starts a server again after it died', async () => {
+    const pool = new McpPool(() => cfg)
+    const box = await pool.toolbox(['echo'])
+    await expect(box.call('mcp_echo_echo', { text: 'crash' })).rejects.toThrow(/exited/)
+    expect((await box.call('mcp_echo_echo', { text: 'again' })).content).toBe('echo: again')
+    pool.closeAll()
+  })
+
   it('reports a server that fails to start', async () => {
     const pool = new McpPool(() => ({ ...cfg, args: ['-e', 'process.exit(1)'] }))
     const box = await pool.toolbox(['bad'])

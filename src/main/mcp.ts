@@ -38,10 +38,14 @@ export class McpClient {
   private session?: string
   private version = PROTOCOL
 
-  private constructor(private cfg: McpConfig) {}
+  private constructor(
+    private cfg: McpConfig,
+    private onExit?: () => void
+  ) {}
 
-  static async connect(cfg: McpConfig, clientVersion = '0.0.0'): Promise<McpClient> {
-    const c = new McpClient(cfg)
+  /** onExit: the stdio server's process ended (crash, kill or close); the client is of no more use. */
+  static async connect(cfg: McpConfig, clientVersion = '0.0.0', onExit?: () => void): Promise<McpClient> {
+    const c = new McpClient(cfg, onExit)
     if (cfg.transport === 'stdio') c.spawn()
     try {
       const init = (await c.request('initialize', {
@@ -114,6 +118,7 @@ export class McpClient {
     const fail = (why: string) => {
       for (const p of this.pending.values()) p.reject(new Error(`${this.cfg.name}: ${why}${this.stderr ? `\n${this.stderr.trim()}` : ''}`))
       this.pending.clear()
+      this.onExit?.()
     }
     child.on('error', (e) => fail(e.message))
     child.on('exit', (code) => fail(`process exited (${code})`))
@@ -228,12 +233,13 @@ export class McpPool {
   ) {}
 
   private get(id: string, cfg: McpConfig): Promise<McpClient> {
-    let c = this.clients.get(id)
-    if (!c) {
-      c = McpClient.connect(cfg, this.clientVersion)
-      c.catch(() => this.clients.delete(id))
-      this.clients.set(id, c)
-    }
+    const known = this.clients.get(id)
+    if (known) return known
+    // A server that died is forgotten, so the next call starts it again.
+    const forget = () => this.clients.get(id) === c && this.clients.delete(id)
+    const c: Promise<McpClient> = McpClient.connect(cfg, this.clientVersion, forget)
+    c.catch(forget)
+    this.clients.set(id, c)
     return c
   }
 
