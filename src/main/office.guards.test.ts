@@ -361,7 +361,7 @@ describe('approvals', () => {
   })
 
   it('marks commands that run in the Docker sandbox', async () => {
-    const { office, events } = setup([agent('ceo', null)], { ceo: (input) => (input ? { calls: [call('run_command', { command: 'ls' })] } : {}) }, {
+    const { office, events } = setup([agent('ceo', null)], { ceo: (input) => (input?.includes('[From the owner]') ? { calls: [call('run_command', { command: 'ls' })] } : {}) }, {
       approval: 'ask',
       sandbox: { kind: 'docker', image: 'node:22', network: false }
     })
@@ -598,7 +598,7 @@ describe('members', () => {
     process.env.PATH = fs.mkdtempSync(path.join(os.tmpdir(), 'nopath-'))
     try {
       const { office, events } = setup([agent('ceo', null)], {
-        ceo: (input) => (input ? { calls: [call('run_command', { command: 'ls' }), call('run_command', { command: 'ls' })] } : {})
+        ceo: (input) => (input?.includes('[From the owner]') ? { calls: [call('run_command', { command: 'ls' }), call('run_command', { command: 'ls' })] } : {})
       }, { sandbox: { kind: 'docker', image: 'node:22', network: false } })
       office.start('go')
       await until(() => !office.isRunning)

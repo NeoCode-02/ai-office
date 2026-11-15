@@ -56,6 +56,8 @@ const DETAIL_CHARS = 2000
 const DIFF_CHARS = 8000
 const COMPACT =
   'Your conversation is getting long and will be restarted. Write a complete summary of your work so far: the task and who gave it, decisions, files you created or changed, what is verified, open problems and the exact next steps. Do not call tools.'
+const WRAP_UP =
+  '[System] The team is idle and nothing has been reported yet. If the goal is done and verified, call `report_to_user` with the final report. Otherwise continue: do the next step yourself or delegate it.'
 const PLAN_FIRST = "Propose your plan with propose_plan and wait for the owner's approval first"
 const PLAN_GATED = new Set<string>(['write_file', 'edit_file', 'run_command'])
 const MANAGED: ToolName[] = ['report_to_user', 'use_skill', 'read_skill_file', 'propose_plan']
@@ -208,6 +210,9 @@ export class Office {
   private plan?: { id: string }
   private planApproved = false
   private dockerWarned = false
+  /** Since the owner's latest message: the owner heard from the top executive / it was reminded to wrap up. */
+  private toldOwner = false
+  private nudged = false
 
   constructor(
     private project: Project,
@@ -249,6 +254,7 @@ export class Office {
     this.checkBudget()
     this.chatter.clear()
     this.capBase = this.requestCount
+    this.toldOwner = this.nudged = false
     this.emit({ type: 'message', id: randomUUID(), at: Date.now(), from: USER, to: [to], text })
     this.setRunning(true)
     this.deliver(to, `[From the owner] ${text}`)
@@ -342,6 +348,7 @@ export class Office {
   }
 
   private emit(ev: OfficeEvent) {
+    if (ev.type === 'message' && ev.from !== USER && ev.to.includes(USER)) this.toldOwner = true
     this.deps.emit(ev)
   }
 
@@ -392,6 +399,11 @@ export class Office {
     if (!this.running) return
     // A blocked member keeps the run open until the owner answers.
     for (const m of this.members.values()) if (m.busy || m.inbox.length || m.blocked) return
+    // Work that died out silently (an empty reply, a member that never answered) is not a finished task.
+    if (!this.plan && !this.toldOwner && !this.nudged) {
+      this.nudged = true
+      return this.deliver(this.ceo.id, WRAP_UP)
+    }
     this.setRunning(false, this.plan ? 'plan' : 'idle')
   }
 

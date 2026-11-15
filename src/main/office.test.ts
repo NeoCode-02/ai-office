@@ -103,6 +103,24 @@ describe('office', () => {
     expect(reply).toMatch(/not available/)
   })
 
+  it('reminds the top executive once when the work dies out without a word to the owner', async () => {
+    const seen: string[] = []
+    const { office, events, finished } = setup([agent('ceo', null), agent('dev', 'ceo')], {
+      ceo: (input) => {
+        if (input) seen.push(input)
+        if (input?.includes('[From the owner]')) return { calls: [call('message', { to: ['dev'], text: 'go' })] }
+        return input?.startsWith('[System]') ? { text: 'dev never answered' } : {}
+      },
+      // An empty reply: nothing is forwarded, so the manager is never woken.
+      dev: () => ({})
+    })
+    office.start('g')
+    await finished()
+    expect(seen.filter((s) => s.startsWith('[System]'))).toHaveLength(1)
+    expect(events.filter((e) => e.type === 'message').at(-1)).toMatchObject({ from: 'ceo', to: ['user'], text: 'dev never answered' })
+    expect(events.filter((e) => e.type === 'run').at(-1)).toMatchObject({ state: 'done', reason: 'idle' })
+  })
+
   it('owner can continue a finished run', async () => {
     const seen: string[] = []
     const { office, finished } = setup([agent('ceo', null)], {
