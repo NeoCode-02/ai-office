@@ -83,7 +83,7 @@ const ENDS: Record<string, (e: Extract<OfficeEvent, { type: 'run' }>) => string>
   cap: (e) => `The spending cap was reached (${money(e.usd ?? 0)})`,
   app_closed: () => 'The app was closed'
 }
-const ASKS = { command: 'wants to run', mcp: 'wants to use', fetch: 'wants to open a local address:' }
+const ASKS = { command: 'wants to run', mcp: 'wants to use', fetch: 'wants to open' }
 
 /** A finished task as a Markdown document the owner can keep or share. */
 export function runToMarkdown(project: Project, run: RunSummary, events: OfficeEvent[]): string {

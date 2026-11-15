@@ -52,7 +52,7 @@ export const TOOL_DEFS: Record<ToolName, ToolDef> = {
   web_fetch: {
     name: 'web_fetch',
     description:
-      'Download a web page or file over http(s) and return its text (HTML is converted to plain text, at most 2 MB is read). Addresses on this computer or the local network need permission from the owner. Use for documentation, APIs, references.',
+      'Download a web page or file over http(s) and return its text (HTML is converted to plain text, at most 2 MB is read). The owner may have to allow the host first. Use for documentation, APIs, references.',
     parameters: params({ url: str('Full http:// or https:// URL') }, ['url'])
   },
   message: {
@@ -102,7 +102,7 @@ export interface ToolCtx {
   signal?: AbortSignal
   /** Where run_command executes; missing = on this computer. */
   sandbox?: Sandbox
-  /** Asked before web_fetch opens this computer or the local network; missing = refused. */
+  /** Asked before web_fetch opens a host; missing = this computer and the local network are refused, other hosts allowed. */
   approveFetch?(url: string): Promise<boolean>
 }
 
@@ -337,8 +337,10 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
       case 'run_command':
         if (!(await ctx.approve(s('command')))) return fail('The owner declined this command')
         return await asCommand(gate, () => exec(s('command'), ctx.root, { signal: ctx.signal, sandbox: ctx.sandbox }))
-      case 'web_fetch':
-        return ok(await webFetch(s('url'), { signal: ctx.signal, approveLocal: ctx.approveFetch && ((url) => ctx.approveFetch!(url)) }))
+      case 'web_fetch': {
+        const ask = ctx.approveFetch && ((url: string) => ctx.approveFetch!(url))
+        return ok(await webFetch(s('url'), { signal: ctx.signal, approveLocal: ask, approvePublic: ask }))
+      }
       case 'message': {
         const err = ctx.send((a.to as unknown[]).map(String), s('text'))
         return err ? fail(err) : ok('Sent')

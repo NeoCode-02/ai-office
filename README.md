@@ -85,7 +85,7 @@ Every request is logged with the tokens the provider reported, and **Usage** sho
 ## Working with a team
 
 - **Plan mode** (office settings): the CEO proposes a plan with `propose_plan` and, until you approve it, can only read: no files written, no commands, no MCP tools, no delegating. You approve or send feedback.
-- **Approvals**: commands, MCP tools and fetches of this computer or the local network ask first. "Always allow" remembers the command (also with more arguments), the tool or the host for this office; the list is in office settings.
+- **Approvals**: commands, MCP tools and web fetches ask first. "Always allow" remembers the command (also with more arguments), the tool or the host for this office; the list is in office settings.
 - **Changes**: the Changes panel lists the files the task added, changed or deleted, with diffs. Undo one file or all; snapshots live in a separate repository, your own `.git` is never touched. Workspaces over 20,000 files or 1 GB are not snapshotted (the task still runs).
 - **Long tasks**: when a member's conversation gets long it is summarized and restarted (compaction), so long work does not hit the model's limit.
 - **Docker sandbox** (optional, office settings): `run_command` runs in a container with only the workspace mounted (its `.git` read-only) and no network unless you allow it.
@@ -109,7 +109,7 @@ Everything works without extensions. When you need more, go to **Settings → Ex
 - API keys, MCP environment variables and headers are encrypted with the operating system's keychain (`safeStorage`) and never leave your computer except to the provider you configured.
 - File tools are confined to the office's workspace folder: symlinks are resolved (also in folders that don't exist yet), writing inside `.git` is refused, FIFOs and devices are refused, and file tools wait while a command runs in the same workspace so a command can't swap a folder for a symlink mid-check.
 - `web_fetch` resolves each host once and pins the address. Link-local, multicast and reserved addresses (cloud metadata services) are never fetched; this computer (including its own public addresses) and the local network need your approval. Redirects are checked again; responses are capped at 2 MB.
-- Terminal commands, MCP tool calls and local fetches ask for your approval by default. **Automatic mode is not a sandbox**, and neither are MCP servers: they run with your permissions. The optional Docker sandbox only covers `run_command`.
+- Terminal commands, MCP tool calls and web fetches ask for your approval by default. **Automatic mode is not a sandbox**, and neither are MCP servers: they run with your permissions. The optional Docker sandbox only covers `run_command`.
 - The main process only answers its own window, and checks the shape of every argument it receives.
 - Text from imported skills, plugins, offices, fetched web pages and files is given to the models. Only import what you trust.
 

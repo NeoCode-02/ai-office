@@ -56,7 +56,7 @@ Har bir so‘rov provayder qaytargan tokenlar bilan yoziladi. **Statistika** sah
 ## Jamoa bilan ishlash
 
 - **Plan rejimi** (ofis sozlamalari): bosh rahbar `propose_plan` bilan reja yuboradi va siz tasdiqlamaguningizcha faqat o‘qiy oladi: fayl yozmaydi, buyruq ishlatmaydi, MCP asboblaridan foydalanmaydi va ish topshirmaydi. Siz tasdiqlaysiz yoki fikr bildirasiz.
-- **Tasdiqlash**: buyruqlar, MCP asboblari va shu kompyuter yoki lokal tarmoqqa so‘rovlar oldin so‘raladi. "Har doim ruxsat" bu ofis uchun buyruqni (qo‘shimcha argumentlari bilan ham), asbobni yoki hostni eslab qoladi; ro‘yxat ofis sozlamalarida.
+- **Tasdiqlash**: buyruqlar, MCP asboblari va veb so‘rovlar oldin so‘raladi. "Har doim ruxsat" bu ofis uchun buyruqni (qo‘shimcha argumentlari bilan ham), asbobni yoki hostni eslab qoladi; ro‘yxat ofis sozlamalarida.
 - **O‘zgarishlar**: panelda vazifa qo‘shgan, o‘zgartirgan yoki o‘chirgan fayllar diff bilan ko‘rinadi. Bitta faylni yoki hammasini qaytarish mumkin; snapshot'lar alohida repo'da saqlanadi, sizning `.git` papkangizga tegilmaydi. 20 000 dan ortiq fayl yoki 1 GB dan katta workspace snapshot qilinmaydi (vazifa baribir ishlaydi).
 - **Uzun vazifalar**: xodim suhbati uzayib ketsa, u qisqa xulosaga aylantirilib qayta boshlanadi (compaction), shuning uchun uzoq ish model limitiga urilmaydi.
 - **Docker sandbox** (ixtiyoriy, ofis sozlamalari): `run_command` konteynerda ishlaydi — faqat workspace ulanadi (`.git` faqat o‘qish uchun), ruxsat bermasangiz tarmoq yo‘q.

@@ -104,7 +104,7 @@ describe('approval card', () => {
 
   it('explains local fetches and offers the host for good', () => {
     const out = render(one([{ type: 'approval', id: 'x', agentId: 'b', kind: 'fetch', command: 'http://localhost:8080/admin', at: 1 }]))
-    expect(out).toContain('Bob wants to open a local address')
+    expect(out).toContain('Bob wants to open a web address')
     expect(out).toContain('localhost:8080')
     expect(out).toContain('private services')
   })

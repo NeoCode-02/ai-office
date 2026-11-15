@@ -12,6 +12,8 @@ export interface FetchOpts {
   signal?: AbortSignal
   /** Asked before connecting to this computer or the local network; absent = refused. */
   approveLocal?(url: string): Promise<boolean>
+  /** Asked before connecting to any other host (a URL can carry workspace data out); absent = allowed. */
+  approvePublic?(url: string): Promise<boolean>
   /** Default 20 s, not counting the time the owner takes to answer. */
   timeoutMs?: number
   /** Default 2 MB of (decompressed) body. */
@@ -287,20 +289,21 @@ function decode(body: Buffer, type: string): string {
   }
 }
 
-async function askOwner(url: string, opts: FetchOpts): Promise<boolean> {
-  if (!opts.approveLocal) return false
-  if (!opts.signal) return opts.approveLocal(url)
+async function askOwner(url: string, ask: FetchOpts['approveLocal'], signal?: AbortSignal): Promise<boolean> {
+  if (!ask) return false
+  if (!signal) return ask(url)
   try {
-    return await abortable(opts.approveLocal(url), opts.signal)
+    return await abortable(ask(url), signal)
   } catch (e) {
-    throw opts.signal.aborted ? new Error('Stopped') : e
+    throw signal.aborted ? new Error('Stopped') : e
   }
 }
 
 /**
  * GET over http(s) and return the body as text. Each host is resolved once and its addresses are
  * checked before connecting (and on every redirect): link-local, multicast and reserved addresses
- * are always refused, this computer and the local network only with `approveLocal`.
+ * are always refused, this computer and the local network only with `approveLocal`, and other hosts
+ * are asked about when `approvePublic` is given.
  */
 export async function webFetch(url: string, opts: FetchOpts = {}): Promise<string> {
   let u = httpUrl(url)
@@ -318,9 +321,14 @@ export async function webFetch(url: string, opts: FetchOpts = {}): Promise<strin
       if (BLOCKED.has(cls)) throw new Error(`Blocked: ${where(a.address)} is ${cls === 'unspecified' ? 'an' : 'a'} ${cls} address; such addresses are never fetched`)
       if (cls !== 'public') local ??= a.address
     }
-    if (local && !approved.has(`${u.host} ${local}`)) {
-      if (!(await askOwner(u.href, opts))) throw new Error(`Refused: ${where(local)} is on this computer or the local network, and the owner did not allow it`)
-      approved.add(`${u.host} ${local}`)
+    const key = `${u.host} ${local ?? ''}`
+    if (!approved.has(key)) {
+      if (local) {
+        if (!(await askOwner(u.href, opts.approveLocal, opts.signal))) throw new Error(`Refused: ${where(local)} is on this computer or the local network, and the owner did not allow it`)
+      } else if (opts.approvePublic && !(await askOwner(u.href, opts.approvePublic, opts.signal))) {
+        throw new Error(`Refused: the owner did not allow fetching from ${u.host}`)
+      }
+      approved.add(key)
     }
 
     const r = await timed(clock, opts.signal, (signal) => get(u, addrs, signal, opts.maxBytes ?? MAX_BYTES))

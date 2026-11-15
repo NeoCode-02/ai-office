@@ -123,7 +123,7 @@ describe('task as Markdown', () => {
   })
   it('shows approvals and the plan with their outcome', () => {
     expect(md).toContain('> **Approval:** Bob wants to run `npm test` — allowed for good')
-    expect(md).toContain('> **Approval:** Bob wants to open a local address: `http://localhost:3000` — denied')
+    expect(md).toContain('> **Approval:** Bob wants to open `http://localhost:3000` — denied')
     expect(md).toContain('**Plan from Ann** (09:06)\n\n> Step 1: design\n> Step 2: build\n\n_Changes requested: Add tests first_')
   })
   it('highlights only the final report', () => {

@@ -559,6 +559,12 @@ describe('web_fetch', () => {
     expect(asked).toEqual([`${base}/hello`])
   })
 
+  it('asks about other hosts only when the caller wants that, before connecting', async () => {
+    const asked: string[] = []
+    await expect(webFetch('http://93.184.216.34/?q=secret', { approvePublic: async (url) => (asked.push(url), false) })).rejects.toThrow(/^Refused: .*93\.184\.216\.34/)
+    expect(asked).toEqual(['http://93.184.216.34/?q=secret'])
+  })
+
   it('never fetches link-local, unspecified or multicast addresses, even when allowed', async () => {
     await expect(webFetch('http://169.254.169.254/latest/meta-data/', { approveLocal: yes })).rejects.toThrow(/^Blocked: .*link-local/)
     await expect(webFetch('http://0.0.0.0:1/', { approveLocal: yes })).rejects.toThrow(/^Blocked/)

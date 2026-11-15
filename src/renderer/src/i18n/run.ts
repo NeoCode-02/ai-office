@@ -28,8 +28,8 @@ const en = {
   committed: (sha: string) => `Committed ${sha}`,
   notRepo: 'The workspace is not a Git repository, so there is nowhere to commit. Run “git init” in the folder first, or keep the files as they are.',
 
-  approvalFetch: (name: string) => `${name} wants to open a local address`,
-  fetchNote: 'Addresses on this computer or your local network can reach private services. Allow it only if you expect it.',
+  approvalFetch: (name: string) => `${name} wants to open a web address`,
+  fetchNote: 'The address itself can carry data out of the workspace, and addresses on this computer or your local network can reach private services. Allow it only if you expect it.',
   filesSince: 'Files changed since the last approved command:',
   andMore: (n: number) => `and ${n} more`,
   inDocker: 'in Docker',
@@ -116,8 +116,8 @@ const uz: typeof en = {
   committed: (sha: string) => `Commit qilindi: ${sha}`,
   notRepo: 'Ish papkasi Git repozitoriysi emas, shuning uchun commit qiladigan joy yo‘q. Avval papkada “git init” buyrug‘ini bajaring yoki fayllarni shundayligicha qoldiring.',
 
-  approvalFetch: (name: string) => `${name} lokal manzilni ochmoqchi`,
-  fetchNote: 'Bu kompyuter yoki lokal tarmoqdagi manzillar ichki xizmatlarga yetib borishi mumkin. Faqat buni kutgan bo‘lsangiz ruxsat bering.',
+  approvalFetch: (name: string) => `${name} veb manzilni ochmoqchi`,
+  fetchNote: 'Manzilning o‘zi ish papkasidagi ma’lumotni tashqariga olib chiqishi, bu kompyuter yoki lokal tarmoqdagi manzillar esa ichki xizmatlarga yetib borishi mumkin. Faqat buni kutgan bo‘lsangiz ruxsat bering.',
   filesSince: 'Oxirgi ruxsat berilgan buyruqdan keyin o‘zgargan fayllar:',
   andMore: (n: number) => `va yana ${n} ta`,
   inDocker: 'Docker ichida',
