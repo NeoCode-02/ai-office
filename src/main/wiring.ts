@@ -1,4 +1,5 @@
-import type { AppSettings, OfficeEvent, Project, UsageRecord } from '../shared/types'
+import type { Agent, AppSettings, ModelRef, OfficeEvent, Project, Provider, UsageRecord } from '../shared/types'
+import { priceOf } from './billing'
 import { capUse } from './stats'
 
 /** What waits for the owner (approvals, plans, blocked members) per office: drives the badge. */
@@ -102,6 +103,20 @@ export function createCaps(records: UsageRecord[], now = Date.now()) {
 export function providerUsers(projects: Project[], providerId: string): string {
   return projects
     .flatMap((p) => p.agents.filter((a) => a.providerId === providerId || a.backup?.providerId === providerId).map((a) => `${a.name} (${p.name})`))
+    .join(', ')
+}
+
+/**
+ * "Name (model), …" for every main or backup model billed per token without a known price; '' when
+ * there is none. OpenRouter reports the billed cost itself, so it needs no price.
+ */
+export function unpricedMembers(agents: Agent[], provider: (id: string) => Pick<Provider, 'kind' | 'baseURL' | 'prices' | 'billing'> | undefined): string {
+  const missing = (ref: ModelRef) => {
+    const prov = provider(ref.providerId)
+    return prov?.billing.mode === 'payg' && !/openrouter\.ai/.test(prov.baseURL) && !priceOf(prov, ref.model)
+  }
+  return agents
+    .flatMap((a) => [a, ...(a.backup?.providerId && a.backup.model.trim() ? [a.backup] : [])].filter(missing).map((ref) => `${a.name} (${ref.model})`))
     .join(', ')
 }
 

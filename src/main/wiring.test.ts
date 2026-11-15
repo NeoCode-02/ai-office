@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent, OfficeEvent, Project, UsageRecord } from '../shared/types'
-import { createAttention, createCaps, fileName, providerUsers, throttle, withRule } from './wiring'
+import { createAttention, createCaps, fileName, providerUsers, throttle, unpricedMembers, withRule } from './wiring'
 
 describe('attention', () => {
   it('counts approvals, plans and blocked members until they are answered', () => {
@@ -88,6 +88,21 @@ describe('providerUsers', () => {
     const projects = [office('1', [agent('a', 'x'), agent('b', 'y', 'x')]), office('2', [agent('c', 'y')])]
     expect(providerUsers(projects, 'x')).toBe('A (Office 1), B (Office 1)')
     expect(providerUsers(projects, 'z')).toBe('')
+  })
+})
+
+describe('unpricedMembers', () => {
+  it('names main and backup models billed per token without a price', () => {
+    const prov = (baseURL: string, mode: 'payg' | 'free' = 'payg', prices = {}) => ({ kind: 'openai' as const, baseURL, billing: { mode }, prices })
+    const provs: Record<string, ReturnType<typeof prov>> = {
+      bare: prov('https://api.example.com'),
+      priced: prov('https://api.example.com', 'payg', { m: { in: 1, out: 2 } }),
+      router: prov('https://openrouter.ai/api/v1'),
+      local: prov('http://localhost:11434/v1', 'free')
+    }
+    const agents = [agent('a', 'bare'), agent('b', 'priced', 'bare'), agent('c', 'router'), agent('d', 'local'), agent('e', 'gone')]
+    expect(unpricedMembers(agents, (id) => provs[id])).toBe('A (m), B (b)')
+    expect(unpricedMembers([agent('b', 'priced')], (id) => provs[id])).toBe('')
   })
 })
 

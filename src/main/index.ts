@@ -17,7 +17,7 @@ import { quotaUse, stats, windowStart } from './stats'
 import { createStore } from './store'
 import { checkUpdate } from './updates'
 import { bool, isId, isMcp, isModelRef, isPrices, isProject, isProvider, isSettings, num, obj, optStr, str, strArr } from './validate'
-import { createAttention, createCaps, fileName, providerUsers, throttle, withRule } from './wiring'
+import { createAttention, createCaps, fileName, providerUsers, throttle, unpricedMembers, withRule } from './wiring'
 
 // Separate data folder for tests / portable use.
 if (process.env.AI_OFFICE_DATA) app.setPath('userData', process.env.AI_OFFICE_DATA)
@@ -390,12 +390,8 @@ const handlers: Api = {
     office.start(goal)
     const system = (text: string) => emit(projectId, runId, { type: 'message', id: randomUUID(), at: Date.now(), from: SYSTEM, to: [], text })
     if (snapshotError) system(snapshotError)
-    // OpenRouter reports the billed cost itself; elsewhere pay-per-token needs a price.
-    const unpriced = p.agents.filter((a) => {
-      const prov = store.provider(a.providerId)
-      return prov?.billing.mode === 'payg' && !/openrouter\.ai/.test(prov.baseURL) && !priceOf(prov, a.model)
-    })
-    if (unpriced.length) system(`E_UNPRICED|${unpriced.map((a) => `${a.name} (${a.model})`).join(', ')}`)
+    const unpriced = unpricedMembers(p.agents, (id) => store.provider(id))
+    if (unpriced) system(`E_UNPRICED|${unpriced}`)
     return runId
   },
   post: (projectId: string, text: string, to?: string) => {
