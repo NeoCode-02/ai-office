@@ -84,25 +84,37 @@ const noDocker = (detail: string): ExecResult => ({
   isError: true
 })
 
-/** Collects a capped amount of interleaved stdout/stderr without splitting UTF-8 characters. */
+/**
+ * Collects interleaved stdout/stderr without splitting UTF-8 characters. Long output keeps its
+ * start and its end: builds and tests print what failed last.
+ */
 function collector() {
   const decoders = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') }
-  let text = ''
+  const HALF = MAX_OUT / 2
+  let head = ''
+  let tail = ''
   let dropped = 0
+  const cut = () => {
+    if (tail.length <= HALF) return
+    dropped += tail.length - HALF
+    tail = tail.slice(-HALF)
+  }
   const add = (s: string) => {
-    // A little more than MAX_OUT is kept so trimming leading blanks never shortens the result.
-    const room = MAX_OUT + 1000 - text.length
-    text += s.slice(0, Math.max(0, room))
-    dropped += Math.max(0, s.length - Math.max(0, room))
+    if (!head) s = s.trimStart()
+    const room = HALF - head.length
+    head += s.slice(0, room)
+    tail += s.slice(room)
+    // Not on every chunk: a chatty command would re-slice the tail each time.
+    if (tail.length > HALF * 2) cut()
   }
   return {
     add: (from: 'out' | 'err', d: Buffer) => add(decoders[from].write(d)),
     /** Output followed by the status line, which is never clipped away. */
     result(status: string) {
       add(decoders.out.end() + decoders.err.end())
-      const body = text.trim()
-      const total = body.length + dropped
-      const shown = total > MAX_OUT ? body.slice(0, MAX_OUT) + `\n…[${total - MAX_OUT} more characters truncated]` : body
+      tail = tail.trimEnd()
+      cut()
+      const shown = dropped ? `${head}\n…[${dropped} characters truncated]…\n${tail}` : (head + tail).trimEnd()
       return shown ? `${shown}\n${status}` : status
     }
   }

@@ -269,11 +269,11 @@ describe('exec', { timeout: 20_000 }, () => {
     expect(await exec('echo hi&& exit 3', root)).toEqual({ content: 'hi\n[exit 3]', isError: false })
   })
 
-  it('caps long output but keeps the status line', async () => {
+  it('caps long output, keeping its start, its end and the status line', async () => {
     const root = tmp('ws-')
-    const r = await exec(`"${process.execPath}" -e "process.stdout.write('x'.repeat(50000))"`, root)
-    expect(r.content.startsWith('x'.repeat(MAX_OUT) + '\n…[30000 more characters truncated]')).toBe(true)
-    expect(r.content.endsWith('\n[exit 0]')).toBe(true)
+    const r = await exec(`"${process.execPath}" -e "process.stdout.write('a'.repeat(25000)+'b'.repeat(25000))"`, root)
+    const half = MAX_OUT / 2
+    expect(r.content).toBe(`${'a'.repeat(half)}\n…[${50000 - MAX_OUT} characters truncated]…\n${'b'.repeat(half)}\n[exit 0]`)
   })
 
   it.skipIf(win)('closes stdin, so a command waiting for input ends at once', async () => {
