@@ -33,7 +33,6 @@
     "dist": "electron-vite build && electron-builder",
     "e2e": "electron-vite build && node e2e/run.mjs"
   },
-  "dependencies": {},
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
     "@eslint/js": "^10.0.1",
