@@ -235,8 +235,7 @@ const en = {
     dangerHint: 'Removes the team, history and notes. Files in the workspace are not touched.',
     newTitle: 'New office',
     namePlaceholder: 'e.g. Product studio',
-    template: 'Team template',
-    templateHint: 'You can add, remove or change anyone later.',
+    execsHint: 'Every office starts with its executives: a CEO, and a CTO, CFO, COO and CMO reporting to the CEO. Add everyone else on the Team canvas.',
     defaultProvider: 'Default provider',
     defaultModel: 'Default model',
     defaultModelHint: 'Given to everyone; change per person later.',
@@ -247,11 +246,6 @@ const en = {
     errFolder: 'Choose a workspace folder.',
     errModel: 'Choose a default provider and model.'
   },
-  templates: {
-    software: ['Software product', 'CEO, CTO, two engineers, QA, designer, marketing'],
-    security: ['Security audit', 'Lead, security engineer, pentester, lawyer'],
-    blank: ['Blank', 'Just the CEO. Build the team yourself.']
-  } as Record<string, [string, string]>,
   names: ['Maya', 'Daniel', 'Lena', 'Omar', 'Priya', 'Jonas', 'Sofia', 'Kenji', 'Amara', 'Lucas'],
   prefs: {
     title: 'Settings',
@@ -680,8 +674,7 @@ const uz: Dict = {
     dangerHint: 'Jamoa, tarix va eslatmalar o‘chadi. Ish papkasidagi fayllarga tegilmaydi.',
     newTitle: 'Yangi ofis',
     namePlaceholder: 'Masalan: Mahsulot studiyasi',
-    template: 'Jamoa shabloni',
-    templateHint: 'Keyin istalgan xodimni qo‘shish, o‘chirish yoki o‘zgartirish mumkin.',
+    execsHint: 'Har bir ofis rahbarlar bilan boshlanadi: CEO va unga bo‘ysunuvchi CTO, CFO, COO, CMO. Qolgan xodimlarni Jamoa sahifasidagi canvas’da qo‘shasiz.',
     defaultProvider: 'Standart provayder',
     defaultModel: 'Standart model',
     defaultModelHint: 'Hammaga beriladi; keyin har biriga alohida tanlaysiz.',
@@ -691,11 +684,6 @@ const uz: Dict = {
     errName: 'Ofis nomini kiriting.',
     errFolder: 'Ish papkasini tanlang.',
     errModel: 'Standart provayder va modelni tanlang.'
-  },
-  templates: {
-    software: ['Dasturiy mahsulot', 'CEO, CTO, ikki dasturchi, QA, dizayner, marketing'],
-    security: ['Xavfsizlik auditi', 'Rahbar, xavfsizlik muhandisi, pentester, yurist'],
-    blank: ['Bo‘sh', 'Faqat bosh rahbar. Jamoani o‘zingiz tuzasiz.']
   },
   names: ['Aziz', 'Bobur', 'Dilnoza', 'Sardor', 'Kamola', 'Jasur', 'Madina', 'Nodir', 'Zarina', 'Timur'],
   prefs: {

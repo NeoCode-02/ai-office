@@ -1,4 +1,5 @@
-import type { Agent, ModelRef, RoleTemplate, ToolName } from '../../shared/types'
+import { EXEC_KINDS, type Agent, type Exec, type ModelRef, type RoleTemplate, type ToolName } from '../../shared/types'
+import { sameJson } from './orgchart'
 
 const DEV: ToolName[] = ['list_files', 'read_file', 'write_file', 'edit_file', 'run_command']
 const DOCS: ToolName[] = ['list_files', 'read_file', 'write_file', 'edit_file']
@@ -14,6 +15,9 @@ export interface Role {
 export const ROLES: Role[] = [
   { title: 'CEO', department: 'Leadership', tools: DOCS, instructions: 'Own the goal end to end. Turn it into department-level objectives, assign them to department heads, keep everyone aligned, and deliver one verified final report to the owner.' },
   { title: 'CTO', department: 'Engineering', tools: DEV, instructions: 'Own technical direction. Choose the stack and architecture, split engineering work into tasks with acceptance criteria, review code and test results before accepting.' },
+  { title: 'CFO', department: 'Finance', tools: DOCS, instructions: 'Own money matters: budgets, pricing, forecasts and costs. Give finance and legal work to your reports, check every number before it goes up, and state your assumptions.' },
+  { title: 'COO', department: 'Operations', tools: DOCS, instructions: 'Own how the work gets done: plans, processes, people and support. Turn goals into schedules with owners, remove blockers and make sure every task has a clear definition of done.' },
+  { title: 'CMO', department: 'Marketing', tools: DOCS, instructions: 'Own positioning, audience and growth. Give marketing and sales work to your reports, keep the message specific and consistent, and judge results by evidence.' },
   { title: 'Project Manager', department: 'Leadership', tools: DOCS, instructions: 'Keep a written plan (PLAN.md) with tasks, owners and status. Chase blockers, keep scope tight, make sure every task has a clear definition of done.' },
   { title: 'Software Engineer', department: 'Engineering', tools: DEV, instructions: 'Write clean, working code with tests. Run the build and tests before reporting. Report what changed, which files, and the test output.' },
   { title: 'Frontend Engineer', department: 'Engineering', tools: DEV, instructions: 'Build accessible, responsive UI. Match the design spec. Verify it builds and renders without errors.' },
@@ -90,43 +94,64 @@ export function withWorkerModel(agents: Agent[], worker?: ModelRef | null): Agen
 
 const R = (t: string) => roleByTitle(t)!
 
-export interface TeamTemplate {
-  id: 'software' | 'lite' | 'security' | 'blank'
-  /** `n` = localized first names, so templates feel native in each language. */
-  build(n: string[], providerId: string, model: string): Agent[]
+export const EXEC_TITLES: Record<Exec, string> = { ceo: 'CEO', cto: 'CTO', cfo: 'CFO', coo: 'COO', cmo: 'CMO' }
+const isExecTitle = (t: string) => Object.values(EXEC_TITLES).some((x) => same(x, t))
+
+/** Roles the owner can add (the executives are always there already). */
+export const STAFF_ROLES = ROLES.filter((r) => !isExecTitle(r.title))
+
+/**
+ * The office with its five executives in place, the one invariant every team keeps: one CEO at the top,
+ * CTO/CFO/COO/CMO reporting to the CEO. Old offices are fixed up: the top member becomes the CEO, a
+ * member with an executive's title becomes that executive, a missing one is hired (`names`, the CEO's
+ * model, or `model` for an empty team), and anyone without a manager reports to the CEO.
+ * Returns `agents` itself when nothing had to change.
+ */
+export function withExecs(agents: Agent[], names: string[], model: ModelRef = { providerId: '', model: '' }): Agent[] {
+  const list = agents.map((a) => ({ ...a }))
+  const taken = new Set<Exec>()
+  for (const a of list) {
+    if (!a.exec) continue
+    if (taken.has(a.exec)) delete a.exec
+    else taken.add(a.exec)
+  }
+  const used = new Set(list.map((a) => a.name.trim().toLowerCase()))
+  const hire = (title: string, base: ModelRef) => {
+    let name = names.find((n) => !used.has(n.toLowerCase())) ?? title
+    for (let i = 2; used.has(name.toLowerCase()); i++) name = `${title} ${i}`
+    used.add(name.toLowerCase())
+    const a = newAgent(name, R(title), null, base.providerId, base.model)
+    list.push(a)
+    return a
+  }
+  let ceo: Agent | undefined
+  for (const kind of EXEC_KINDS) {
+    const title = EXEC_TITLES[kind]
+    const a =
+      list.find((x) => x.exec === kind) ??
+      list.find((x) => !x.exec && (kind === 'ceo' ? !x.reportsTo : same(x.title, title))) ??
+      hire(title, ceo ?? model)
+    a.exec = kind
+    a.title = title
+    ceo ??= a
+  }
+  const ids = new Set(list.map((a) => a.id))
+  for (const a of list) {
+    if (a === ceo) a.reportsTo = null
+    else if (a.exec || !a.reportsTo || !ids.has(a.reportsTo)) a.reportsTo = ceo!.id
+  }
+  return sameJson(list, agents) ? agents : list
 }
 
-export const TEMPLATES: TeamTemplate[] = [
-  {
-    id: 'software',
-    build(n, p, m) {
-      const ceo = newAgent(n[0], R('CEO'), null, p, m)
-      const cto = newAgent(n[1], R('CTO'), ceo.id, p, m)
-      const mkt = newAgent(n[2], R('Marketing Manager'), ceo.id, p, m)
-      return [
-        ceo, cto, mkt,
-        newAgent(n[3], R('Software Engineer'), cto.id, p, m),
-        newAgent(n[4], R('Frontend Engineer'), cto.id, p, m),
-        newAgent(n[5], R('QA Engineer'), cto.id, p, m),
-        newAgent(n[6], R('Product Designer'), ceo.id, p, m),
-        newAgent(n[7], R('Copywriter'), mkt.id, p, m)
-      ]
-    }
-  },
-  {
-    id: 'lite',
-    build(n, p, m) {
-      const ceo = newAgent(n[0], R('CEO'), null, p, m)
-      return [ceo, newAgent(n[1], R('Software Engineer'), ceo.id, p, m), newAgent(n[2], R('Reviewer'), ceo.id, p, m)]
-    }
-  },
-  {
-    id: 'security',
-    build(n, p, m) {
-      const ceo = newAgent(n[0], R('CEO'), null, p, m)
-      const head = newAgent(n[9], { ...R('Security Engineer'), title: 'Head of Security' }, ceo.id, p, m)
-      return [ceo, head, newAgent(n[1], R('Pentester'), head.id, p, m), newAgent(n[4], R('Security Engineer'), head.id, p, m), newAgent(n[8], R('Lawyer'), ceo.id, p, m)]
-    }
-  },
-  { id: 'blank', build: (n, p, m) => [newAgent(n[0], R('CEO'), null, p, m)] }
+const HEADS: [RegExp, Exec][] = [
+  [/^(engineering|data|security|design|it|product)$/i, 'cto'],
+  [/^(finance|legal|accounting)$/i, 'cfo'],
+  [/^(marketing|sales|growth)$/i, 'cmo'],
+  [/^(operations|hr|support|leadership)$/i, 'coo']
 ]
+
+/** Who a new member of `department` reports to when dropped on empty canvas: their executive, else the CEO. */
+export function headFor(agents: Agent[], department: string): Agent | undefined {
+  const kind = HEADS.find(([re]) => re.test(department.trim()))?.[1] ?? 'ceo'
+  return agents.find((a) => a.exec === kind) ?? agents.find((a) => a.exec === 'ceo') ?? agents.find((a) => !a.reportsTo)
+}

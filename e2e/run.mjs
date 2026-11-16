@@ -20,7 +20,7 @@ fs.mkdirSync(ws)
 
 const call = (name, args) => ({ role: 'assistant', content: null, tool_calls: [{ id: `c${Math.random().toString(36).slice(2)}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] })
 
-// The "Lite" team: Maya (CEO) delegates to Daniel (engineer), who writes a file, runs a command and reports back.
+// A new office: Maya (CEO) delegates to Daniel (CTO), who writes a file, runs a command and reports back.
 function reply(messages) {
   const me = /You are (\w+),/.exec(messages[0].content)?.[1]
   const last = messages.at(-1)
@@ -172,13 +172,10 @@ try {
     await until('New office', clickText, 'New office')
     await until('office name', fill, 'Office name', 'E2E office')
     await inPage(fill, 'Workspace folder', ws)
-    await until('the Lite template', () => {
-      const b = [...document.querySelectorAll('button.choice')].find((x) => x.querySelector('.t')?.textContent.trim() === 'Lite')
-      b?.click()
-      return b?.getAttribute('aria-pressed') === 'true'
-    })
     await until('model field', fill, 'Default model', 'fake-model')
     await until('Create office', clickText, 'Create office')
+    // Every office starts with its five executives on the Team canvas.
+    await until('the executives', () => [...document.querySelectorAll('.node-title')].map((e) => e.textContent.trim()).sort().join() === 'CEO,CFO,CMO,COO,CTO')
     await until('the Work tab', () => {
       const tab = [...document.querySelectorAll('[role=tab]')].find((x) => x.textContent.trim() === 'Work')
       tab?.click()

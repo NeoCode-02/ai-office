@@ -70,6 +70,10 @@ export type ToolName = (typeof TOOL_NAMES)[number]
 /** Anthropic `output_config.effort`. Unset = the model's default. */
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+/** The executives every office has: they can't be removed, and their role and place in the chart are fixed. */
+export const EXEC_KINDS = ['ceo', 'cto', 'cfo', 'coo', 'cmo'] as const
+export type Exec = (typeof EXEC_KINDS)[number]
+
 export interface Agent {
   id: string
   name: string
@@ -90,6 +94,10 @@ export interface Agent {
   maxTokens?: number
   /** Skill names this member may load. Unset = every enabled skill. */
   skills?: string[]
+  /** Set on the fixed executives; see EXEC_KINDS. */
+  exec?: Exec
+  /** Where the card sits on the team canvas. Unset = laid out automatically. */
+  pos?: { x: number; y: number }
 }
 
 /** Guards that end a run which is not getting anywhere. 0 turns a guard off. */

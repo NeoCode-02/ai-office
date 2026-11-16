@@ -3,7 +3,7 @@ import { DEFAULT_SANDBOX, type ModelRef, type Project, type Provider } from '../
 import { errText, useT } from './i18n'
 import { allowEntry, isDirty, latestProject, saveForm, toForm, type AllowKind, type OfficeForm } from './officeForm'
 import { sameJson } from './orgchart'
-import { TEMPLATES, uid, withWorkerModel, type TeamTemplate } from './roles'
+import { uid, withExecs, withWorkerModel } from './roles'
 import { ModelInput } from './Team'
 import { baseName, ConfirmButton, Empty, Field, Icon, Modal, Switch, type IconName } from './ui'
 
@@ -310,7 +310,6 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
   const t = useT()
   const usable = providers.filter((p) => p.hasKey || p.baseURL.includes('localhost'))
   const [name, setName] = useState('')
-  const [tpl, setTpl] = useState<TeamTemplate['id']>('software')
   const [providerId, setProviderId] = useState(usable[0]?.id ?? '')
   const [model, setModel] = useState('')
   const [worker, setWorker] = useState<ModelRef>({ providerId: '', model: '' })
@@ -328,17 +327,15 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
     )
   }
 
-  const template = TEMPLATES.find((x) => x.id === tpl) ?? TEMPLATES[0]
-  // The blank template is only the CEO: there is nobody to give a worker model.
-  const hasWorkers = template.id !== 'blank'
   const hasKey = (id: string) => providers.find((p) => p.id === id)?.hasKey
 
   const create = async () => {
     if (!name.trim()) return setErr(t.office.errName)
     if (!dir.trim()) return setErr(t.office.errFolder)
     if (!providerId || !model.trim()) return setErr(t.office.errModel)
-    if (hasWorkers && worker.providerId && !worker.model.trim()) return setErr(t.org.errWorkerModel)
-    const agents = withWorkerModel(template.build(t.names, providerId, model.trim()), hasWorkers ? worker : null)
+    if (worker.providerId && !worker.model.trim()) return setErr(t.org.errWorkerModel)
+    // Every office starts with its executives; the owner adds everyone else on the Team canvas.
+    const agents = withWorkerModel(withExecs([], t.names, { providerId, model: model.trim() }), worker)
     setErr('')
     setBusy(true)
     try {
@@ -367,51 +364,33 @@ export function NewProject({ providers, onClose, onCreate, onProviders }: { prov
           <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t.office.namePlaceholder} />
         </Field>
         <FolderField value={dir} onChange={setDir} />
-        <div className="field" role="group" aria-label={t.office.template}>
-          <span>{t.office.template}</span>
-          <div className="stack tight">
-            {TEMPLATES.map((tp) => {
-              const [title, desc] = t.org.templates[tp.id] ?? t.templates[tp.id] ?? [tp.id, '']
-              return (
-                <button key={tp.id} type="button" className={`choice ${tpl === tp.id ? 'on' : ''}`} aria-pressed={tpl === tp.id} onClick={() => setTpl(tp.id)}>
-                  <div>
-                    <div className="t">{title}</div>
-                    <div className="d">{desc}</div>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-          <small>{t.office.templateHint}</small>
-        </div>
+        <p className="faint small">{t.office.execsHint}</p>
         <div className="grid2">
           <Field label={t.office.defaultProvider}>
             <select className="select" value={providerId} onChange={(e) => setProviderId(e.target.value)}>
               {usable.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
-          <Field label={t.office.defaultModel} hint={hasWorkers && worker.providerId ? t.org.ceoModelHint : t.office.defaultModelHint}>
+          <Field label={t.office.defaultModel} hint={worker.providerId ? t.org.ceoModelHint : t.office.defaultModelHint}>
             <ModelInput providerId={providerId} hasKey={hasKey(providerId)} value={model} onChange={setModel} />
           </Field>
         </div>
-        {hasWorkers && (
-          <div className="stack tight">
-            <div className="grid2">
-              <Field label={t.org.workerModel}>
-                <select className="select" value={worker.providerId} onChange={(e) => setWorker({ providerId: e.target.value, model: e.target.value ? worker.model : '' })}>
-                  <option value="">{t.org.sameAsCeo}</option>
-                  {usable.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+        <div className="stack tight">
+          <div className="grid2">
+            <Field label={t.org.workerModel}>
+              <select className="select" value={worker.providerId} onChange={(e) => setWorker({ providerId: e.target.value, model: e.target.value ? worker.model : '' })}>
+                <option value="">{t.org.sameAsCeo}</option>
+                {usable.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </Field>
+            {worker.providerId && (
+              <Field label={t.team.model}>
+                <ModelInput providerId={worker.providerId} hasKey={hasKey(worker.providerId)} value={worker.model} onChange={(m) => setWorker({ ...worker, model: m })} />
               </Field>
-              {worker.providerId && (
-                <Field label={t.team.model}>
-                  <ModelInput providerId={worker.providerId} hasKey={hasKey(worker.providerId)} value={worker.model} onChange={(m) => setWorker({ ...worker, model: m })} />
-                </Field>
-              )}
-            </div>
-            <small className="faint">{t.org.workerModelHint}</small>
+            )}
           </div>
-        )}
+          <small className="faint">{t.org.workerModelHint}</small>
+        </div>
         {err && <div className="note danger" role="alert">{err}</div>}
       </div>
     </Modal>

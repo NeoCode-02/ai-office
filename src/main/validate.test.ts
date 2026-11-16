@@ -71,7 +71,7 @@ describe('isProject', () => {
   it('accepts a valid office, with or without the v0.3 fields', () => {
     expect(isProject(project())).toBe(true)
     const full = project({ limits: DEFAULT_LIMITS, planFirst: true, allowCommands: ['npm test', 'mcp:github › list', 'fetch:localhost'], sandbox: DEFAULT_SANDBOX, checkpoints: false })
-    full.agents[0] = agent({ effort: 'xhigh', maxTokens: 64000, skills: ['testing'], mcpServers: ['plugin:acme:echo'] })
+    full.agents[0] = agent({ effort: 'xhigh', maxTokens: 64000, skills: ['testing'], mcpServers: ['plugin:acme:echo'], exec: 'cfo', pos: { x: -40.5, y: 300 } })
     expect(isProject(full)).toBe(true)
     expect(isProject({ ...project(), extra: 'kept' })).toBe(true)
   })
@@ -96,7 +96,9 @@ describe('isProject', () => {
       { ...agent(), reportsTo: undefined }, { ...agent(), reportsTo: '../up' }, { ...agent(), title: 1 }, { ...agent(), instructions: [] },
       agent({ tools: ['read_file', 'rm_rf' as 'read_file'] }), { ...agent(), tools: 'read_file' }, agent({ effort: 'extreme' as 'max' }),
       agent({ maxTokens: 0 }), agent({ maxTokens: -5 }), agent({ maxTokens: 1.5 }), agent({ maxTokens: NaN }), { ...agent(), maxTokens: '100' },
-      { ...agent(), skills: [null] }, { ...agent(), mcpServers: 'all' }, { ...agent(), backup: { providerId: 'p' } }, { ...agent(), backup: null }
+      { ...agent(), skills: [null] }, { ...agent(), mcpServers: 'all' }, { ...agent(), backup: { providerId: 'p' } }, { ...agent(), backup: null },
+      agent({ exec: 'cio' as 'ceo' }), { ...agent(), exec: null }, { ...agent(), pos: { x: 1 } }, agent({ pos: { x: NaN, y: 0 } }),
+      agent({ pos: { x: 0, y: 1e7 } }), { ...agent(), pos: [0, 0] }
     ]
     for (const a of bad) expect(isAgent(a), JSON.stringify(a)?.slice(0, 160)).toBe(false)
     for (const a of bad) expect(isProject(withAgent(a))).toBe(false)

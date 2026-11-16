@@ -38,10 +38,10 @@ export function subtreeOf(agents: Agent[], id: string): Set<string> {
 
 const tops = (agents: Agent[]) => agents.filter((a) => !a.reportsTo).length
 
-/** A top executive can only move under someone while another top executive remains. */
+/** The fixed executives never move; a top member can only move under someone while another top remains. */
 export const canDrag = (agents: Agent[], id: string) => {
   const a = agents.find((x) => x.id === id)
-  return !!a && (!!a.reportsTo || tops(agents) > 1)
+  return !!a && !a.exec && (!!a.reportsTo || tops(agents) > 1)
 }
 
 /** Whether `id` may be dropped onto `boss`: not onto themselves or anyone below them, and not a no-op. */

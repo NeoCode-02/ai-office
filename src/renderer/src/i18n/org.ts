@@ -1,5 +1,5 @@
 /**
- * Team and office settings additions: per-member effort, skills, limits, plan mode, sandbox, allow list, templates, export. Owner: Team.tsx, Settings.tsx, roles.ts.
+ * Team and office settings additions: per-member effort, skills, limits, plan mode, sandbox, allow list, executives, export. Owner: Team.tsx, Settings.tsx, roles.ts.
  * English first; `uz` must have exactly the same keys (TypeScript checks it).
  */
 const en = {
@@ -7,6 +7,7 @@ const en = {
   dragHint: 'Drag a card onto another person to change their manager',
   dropHint: 'Drop on the new manager',
   moved: (name: string, boss: string) => `${name} now reports to ${boss}`,
+  execLocked: 'Every office has this executive. The role and place in the chart are fixed; everything else can change.',
   // Member sheet
   effort: 'Effort',
   effortHint: 'How much the model thinks before it answers. Higher does better on hard tasks but is slower and costs more.',
@@ -59,7 +60,6 @@ const en = {
   exportSaveFirst: 'Save or discard your changes first.',
   exported: (file: string) => `Exported to ${file}`,
   // New office
-  templates: { lite: ['Lite', 'CEO, engineer and reviewer. Small and cheap to run.'] } as Record<string, [string, string]>,
   workerModel: 'Model for team members (optional)',
   workerModelHint: 'Everyone except the CEO uses it. A cheaper model for workers saves money.',
   sameAsCeo: 'Same as the CEO',
@@ -71,6 +71,7 @@ const uz: typeof en = {
   dragHint: 'Boshlig‘ini almashtirish uchun kartani boshqa xodim ustiga torting',
   dropHint: 'Yangi boshliq ustiga qo‘yib yuboring',
   moved: (name: string, boss: string) => `${name} endi ${boss}ga hisobot beradi`,
+  execLocked: 'Bu rahbar har bir ofisda bor. Roli va jadvaldagi o‘rni o‘zgarmaydi; qolgan hammasini o‘zgartirsa bo‘ladi.',
   effort: 'Fikrlash darajasi',
   effortHint: 'Model javob berishdan oldin qancha o‘ylashi. Yuqorisi murakkab vazifalarda yaxshiroq, lekin sekinroq va qimmatroq.',
   effortDefault: 'Model standarti',
@@ -120,7 +121,6 @@ const uz: typeof en = {
   exportButton: 'Ofisni eksport qilish…',
   exportSaveFirst: 'Avval o‘zgarishlarni saqlang yoki bekor qiling.',
   exported: (file: string) => `Saqlandi: ${file}`,
-  templates: { lite: ['Yengil', 'Bosh rahbar, dasturchi va tekshiruvchi. Kichik va arzon.'] },
   workerModel: 'Xodimlar uchun model (ixtiyoriy)',
   workerModelHint: 'Bosh rahbardan boshqa hamma shu modelda ishlaydi. Xodimlarga arzonroq model pulni tejaydi.',
   sameAsCeo: 'Bosh rahbarniki bilan bir xil',

@@ -1,4 +1,4 @@
-import { TOOL_NAMES, type Agent, type AppSettings, type Billing, type Effort, type Limits, type McpServer, type ModelRef, type Price, type Project, type Provider, type Sandbox } from '../shared/types'
+import { EXEC_KINDS, TOOL_NAMES, type Agent, type AppSettings, type Billing, type Effort, type Limits, type McpServer, type ModelRef, type Price, type Project, type Provider, type Sandbox } from '../shared/types'
 
 /**
  * Shape checks for values that cross a trust boundary (IPC arguments, imported files).
@@ -132,7 +132,9 @@ export const isAgent = (v: unknown): v is Agent =>
   (v.mcpServers === undefined || strArr(v.mcpServers, 200, 300)) &&
   (v.effort === undefined || oneOf(v.effort, EFFORTS)) &&
   (v.maxTokens === undefined || (Number.isSafeInteger(v.maxTokens) && (v.maxTokens as number) > 0)) &&
-  (v.skills === undefined || strArr(v.skills, 1000, 200))
+  (v.skills === undefined || strArr(v.skills, 1000, 200)) &&
+  (v.exec === undefined || oneOf(v.exec, EXEC_KINDS)) &&
+  (v.pos === undefined || (obj(v.pos) && num(v.pos.x, -1e6, 1e6) && num(v.pos.y, -1e6, 1e6)))
 
 export function isProject(v: unknown): v is Project {
   if (

@@ -167,6 +167,8 @@ export default function Team({ project, providers, live, onSave, notify }: Props
     while (used.has(`${a.name} ${n}`.trim().toLowerCase())) n++
     const copy: Agent = {
       ...a,
+      exec: undefined,
+      pos: undefined,
       id: uid(),
       name: `${a.name} ${n}`,
       // A copy of the top executive becomes their deputy: there can be only one top.
@@ -346,14 +348,14 @@ export default function Team({ project, providers, live, onSave, notify }: Props
                 <input className="input" value={agent.name} onChange={(e) => update({ name: e.target.value })} />
               </Field>
               <Field label={t.team.manager}>
-                <select className="select" value={agent.reportsTo ?? ''} onChange={(e) => update({ reportsTo: e.target.value || null })}>
+                <select className="select" value={agent.reportsTo ?? ''} disabled={!!agent.exec} onChange={(e) => update({ reportsTo: e.target.value || null })}>
                   <option value="">{t.team.noManager}</option>
                   {agents.filter((a) => !subtree.has(a.id)).map((a) => <option key={a.id} value={a.id}>{a.name} — {a.title}</option>)}
                 </select>
               </Field>
             </div>
-            <Field label={t.team.role} hint={t.team.roleHint}>
-              <input className="input" list="role-list" value={agent.title} onChange={(e) => update(changeRole(agent, e.target.value, pluginRoles))} />
+            <Field label={t.team.role} hint={agent.exec ? t.org.execLocked : t.team.roleHint}>
+              <input className="input" list="role-list" value={agent.title} readOnly={!!agent.exec} onChange={(e) => update(changeRole(agent, e.target.value, pluginRoles))} />
               <datalist id="role-list">{roles.map((r) => <option key={r} value={r} />)}</datalist>
             </Field>
             <Field label={t.team.department}>
@@ -485,7 +487,7 @@ export default function Team({ project, providers, live, onSave, notify }: Props
             </details>
           </section>
 
-          {(agent.reportsTo || agents.length === 1) && (
+          {!agent.exec && agent.reportsTo && (
             <section className="sheet-group">
               <ConfirmButton onConfirm={() => remove(agent)}>{t.common.delete}</ConfirmButton>
             </section>

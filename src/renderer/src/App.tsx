@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Project, Provider } from '../../shared/types'
-import { errText, useT } from './i18n'
+import { errText, getLang, LANGS, useT } from './i18n'
 import { applyLive, createBatcher, officeState, type Live, type LiveItem } from './live'
 import Prefs, { type PrefsTab } from './Prefs'
+import { withExecs } from './roles'
 import Settings, { NewProject } from './Settings'
 import { httpsUrl, rovingStep } from './shellUtils'
 import Team from './Team'
@@ -25,6 +26,27 @@ async function snapshot(projectId: string): Promise<LiveItem | null> {
     // The run shows up with its next event.
   }
   return null
+}
+
+/**
+ * Offices made before every office had its executives get them once, saved so the main process runs
+ * the same team. An office that can't be saved is shown as it is.
+ */
+async function withExecsSaved(list: Project[]): Promise<Project[]> {
+  const names = LANGS[getLang()].names
+  return Promise.all(
+    list.map(async (p) => {
+      const agents = withExecs(p.agents, names)
+      if (agents === p.agents) return p
+      const next = { ...p, agents }
+      try {
+        await window.office.saveProject(next)
+        return next
+      } catch {
+        return p
+      }
+    })
+  )
 }
 
 /** Next animation frame; a hidden window gets no frames, so it falls back to a timer there. */
@@ -61,7 +83,7 @@ export default function App() {
 
   const reload = useCallback(
     () =>
-      Promise.all([window.office.listProviders(), window.office.listProjects()]).then(([pv, pj]) => {
+      Promise.all([window.office.listProviders(), window.office.listProjects().then(withExecsSaved)]).then(([pv, pj]) => {
         setProviders(pv)
         setProjects(pj)
         return pj
@@ -157,8 +179,9 @@ export default function App() {
 
   const importOffice = async () => {
     try {
-      const p = await window.office.importProject()
-      if (!p) return
+      const imported = await window.office.importProject()
+      if (!imported) return
+      const [p] = await withExecsSaved([imported])
       setProjects((all) => [...all.filter((x) => x.id !== p.id), p])
       // Its workspace folder may not exist on this computer: show where to change it.
       show(p.id, 'settings')

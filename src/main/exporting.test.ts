@@ -8,7 +8,7 @@ const agent = (x: Partial<Agent>): Agent => ({
 const office: Project = {
   id: 'office1', name: 'Acme', workspaceDir: '/home/me/acme', briefing: 'We sell shoes.', approval: 'auto', budgetUsd: 7.5,
   agents: [
-    agent({ id: 'ceo', name: 'Ann', title: 'CEO', effort: 'high', maxTokens: 64000, skills: ['report-writing'] }),
+    agent({ id: 'ceo', name: 'Ann', title: 'CEO', effort: 'high', maxTokens: 64000, skills: ['report-writing'], exec: 'ceo', pos: { x: 10, y: -20 } }),
     agent({ id: 'cto', name: 'Bob', title: 'CTO', reportsTo: 'ceo', backup: { providerId: 'p2', model: 'cheap' }, mcpServers: ['github'], tools: ['read_file', 'run_command'] }),
     agent({ id: 'dev', name: 'Cem', reportsTo: 'cto' })
   ],
@@ -33,7 +33,8 @@ describe('office export / import', () => {
     expect(p.agents.map((a) => a.id)).toEqual(['new1', 'new2', 'new3'])
     expect(p.agents.map((a) => a.reportsTo)).toEqual([null, 'new1', 'new2'])
     expect(p.agents[1].backup).toEqual({ providerId: 'p2', model: 'cheap' })
-    expect(p.agents[0]).toMatchObject({ name: 'Ann', title: 'CEO', effort: 'high', maxTokens: 64000, skills: ['report-writing'] })
+    expect(p.agents[0]).toMatchObject({ name: 'Ann', title: 'CEO', effort: 'high', maxTokens: 64000, skills: ['report-writing'], exec: 'ceo', pos: { x: 10, y: -20 } })
+    expect(p.agents[1].exec).toBeUndefined()
     expect(p.agents[1]).toMatchObject({ tools: ['read_file', 'run_command'] })
     // A shared file must not hand its members this computer's MCP servers.
     expect(p.agents[1].mcpServers).toBeUndefined()

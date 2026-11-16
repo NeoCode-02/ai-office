@@ -62,6 +62,14 @@ describe('moving a member under another manager', () => {
     expect(orgProblem(moveUnder(two, 'cfo', 'dev'))).toBeNull()
   })
 
+  it('never moves a fixed executive', () => {
+    const all = team().map((a) => (a.id === 'cto' ? { ...a, exec: 'cto' as const } : a))
+    expect(canDrag(all, 'cto')).toBe(false)
+    expect(canMoveUnder(all, 'cto', 'mkt')).toBe(false)
+    // Others may still move under them.
+    expect(canMoveUnder(all, 'mkt', 'cto')).toBe(true)
+  })
+
   it('moves only the dragged member and leaves the input untouched', () => {
     const all = team()
     const next = moveUnder(all, 'dev', 'mkt')
