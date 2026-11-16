@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, RoleTemplate } from '../../shared/types'
 import { orgProblem } from './orgchart'
-import { changeRole, headFor, isStockInstructions, newAgent, roleByTitle, roleDefaults, STAFF_ROLES, withExecs, withWorkerModel } from './roles'
+import { byDepartment, changeRole, headFor, isStockInstructions, newAgent, roleByTitle, roleDefaults, STAFF_ROLES, withExecs, withWorkerModel } from './roles'
 
 const R = (t: string) => roleByTitle(t)!
 const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
@@ -88,6 +88,13 @@ describe('executives', () => {
     // The second "CTO" lost the flag and, still titled CMO, is the CMO again: nobody new is hired.
     expect(fixed.find((a) => a.exec === 'cmo')!.name).toBe('E')
     expect(fixed).toHaveLength(5)
+  })
+
+  it('lists the palette by department, in the order departments first appear', () => {
+    const groups = byDepartment([R('Software Engineer'), R('Copywriter'), R('QA Engineer'), { ...R('Lawyer'), department: '' }])
+    expect(groups.map(([d, list]) => [d, list.map((r) => r.title)])).toEqual([
+      ['Engineering', ['Software Engineer', 'QA Engineer']], ['Marketing', ['Copywriter']], ['', ['Lawyer']]
+    ])
   })
 
   it('sends a new member to the head of their department', () => {

@@ -216,7 +216,6 @@ const en = {
   },
   office: {
     title: 'Office settings',
-    subtitle: 'The briefing is what every team member reads before starting work.',
     name: 'Office name',
     budget: 'Budget per task (USD)',
     budgetHint: '0 means no limit. Work stops when the budget is reached.',
@@ -655,7 +654,6 @@ const uz: Dict = {
   },
   office: {
     title: 'Ofis sozlamalari',
-    subtitle: 'Brifing — har bir xodim ishni boshlashdan oldin o‘qiydigan ma’lumot.',
     name: 'Ofis nomi',
     budget: 'Har bir vazifa byudjeti (USD)',
     budgetHint: '0 — cheklovsiz. Byudjet tugasa ish to‘xtaydi.',

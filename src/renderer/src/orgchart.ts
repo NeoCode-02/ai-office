@@ -54,13 +54,23 @@ export function belowOf(boss: Point, reports: number): Point {
   return { x: boss.x + reports * (CARD.w + GAP.x), y: boss.y + CARD.h + GAP.y }
 }
 
-/** A manager → report line: from the bottom middle of one card to the top middle of the other. */
+const RADIUS = 10
+
+/**
+ * A manager → report line: down from the bottom middle of one card, across, and into the top middle
+ * of the other, with rounded corners. Always the same commands, so CSS can animate from one line to another.
+ */
 export function edgePath(from: Point, to: Point): string {
   const x1 = from.x + CARD.w / 2
   const y1 = from.y + CARD.h
   const x2 = to.x + CARD.w / 2
-  const bend = Math.max(30, Math.abs(to.y - y1) / 2)
-  return `M${x1} ${y1} C${x1} ${y1 + bend} ${x2} ${to.y - bend} ${x2} ${to.y}`
+  const y2 = to.y
+  // Turn halfway down when the report is below; otherwise after a short drop.
+  const ym = y2 > y1 + 2 * RADIUS ? (y1 + y2) / 2 : y1 + GAP.y / 2
+  const sx = Math.sign(x2 - x1)
+  const sy = Math.sign(y2 - ym)
+  const r = Math.min(RADIUS, Math.abs(x2 - x1) / 2, Math.abs(y2 - ym))
+  return `M${x1} ${y1} V${ym - r} Q${x1} ${ym} ${x1 + sx * r} ${ym} H${x2 - sx * r} Q${x2} ${ym} ${x2} ${ym + sy * r} V${y2}`
 }
 
 /** The member and everyone below them. Safe on reporting loops. */

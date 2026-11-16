@@ -112,7 +112,7 @@ export default function Usage({ providers, projects, openProviders, openCaps }: 
             </div>
           )}
 
-          {range !== 'today' && s.total.requests > 0 && <DailyChart days={s.byDay} />}
+          {range !== 'today' && s.byDay.some((d) => d.usd > 0) && <DailyChart days={s.byDay} />}
         </>
       )}
 

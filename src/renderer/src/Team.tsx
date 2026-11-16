@@ -5,7 +5,7 @@ import { errText, useT } from './i18n'
 import { createModelCache } from './modelList'
 import { latestProject } from './officeForm'
 import { autoLayout, belowOf, CARD, canMoveUnder, edgePath, liveStatus, maxTokensFrom, moveUnder, orgProblem, sameJson, subtreeOf, type Point } from './orgchart'
-import { changeRole, headFor, newAgent, roleByTitle, roleDefaults, roleFrom, ROLES, STAFF_ROLES, starterRole, uid, type Role } from './roles'
+import { byDepartment, changeRole, headFor, newAgent, roleByTitle, roleDefaults, roleFrom, ROLES, STAFF_ROLES, starterRole, uid, type Role } from './roles'
 import { isOpenRouter, num } from './Pricing'
 import { Avatar, ConfirmButton, Field, Icon, Sheet } from './ui'
 
@@ -114,8 +114,19 @@ const PAD = 40
 const ZOOM = { min: 0.4, max: 1.5, step: 0.1 }
 const clampZoom = (z: number) => Math.round(Math.min(ZOOM.max, Math.max(ZOOM.min, z)) * 10) / 10
 
-/** Width of the rail and the role palette beside the canvas (styles.css). */
-const CHROME = 232 + 196
+/** Widths of the rail and the role palette beside the canvas (styles.css). */
+const RAIL = 232
+const PALETTE = 176
+const PALETTE_KEY = 'ai-office.palette'
+
+/** localStorage can be unavailable; the setting is only a convenience. */
+function stored(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
 
 /** The canvas area the cards need, with the room around them. */
 function sizeOf(agents: Agent[], auto: Map<string, Point>) {
@@ -167,8 +178,9 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
   const [mcp, setMcp] = useState<McpServer[]>([])
   const [pluginRoles, setPluginRoles] = useState<RoleTemplate[]>([])
   const [skills, setSkills] = useState<{ list: Skill[]; error?: unknown } | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(() => stored(PALETTE_KEY) !== '0')
   // Open with the whole width of the chart in view (down to 60%).
-  const [zoom, setZoom] = useState(() => clampZoom(Math.max(0.6, Math.min(1, Math.floor(((window.innerWidth - CHROME) / sizeOf(project.agents, autoLayout(project.agents)).w) * 10) / 10))))
+  const [zoom, setZoom] = useState(() => clampZoom(Math.max(0.6, Math.min(1, Math.floor(((window.innerWidth - RAIL - (paletteOpen ? PALETTE : 0)) / sizeOf(project.agents, autoLayout(project.agents)).w) * 10) / 10))))
   /** A line being drawn from a manager's port; `to` is the pointer in canvas units. */
   const [link, setLink] = useState<{ from: string; to: Point } | null>(null)
   /** The card a line or a role from the palette would land on. */
@@ -361,6 +373,16 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
     hire(role, onto ?? headFor(agents, role.department), onto ? undefined : { x: Math.max(0, Math.round(p.x - CARD.w / 2)), y: Math.max(0, Math.round(p.y - CARD.h / 2)) })
   }
 
+  const togglePalette = () => {
+    const open = !paletteOpen
+    setPaletteOpen(open)
+    try {
+      localStorage.setItem(PALETTE_KEY, open ? '1' : '0')
+    } catch {
+      // not persisted; still applies until the app closes
+    }
+  }
+
   const fit = () => {
     const el = canvas.current
     if (el) setZoom(clampZoom(Math.floor(Math.min(el.clientWidth / size.w, el.clientHeight / size.h) * 10) / 10))
@@ -378,42 +400,53 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
   const defaults = agent ? roleDefaults(agent, pluginRoles) : null
 
   return (
-    <div className="org">
-      <aside className="org-palette" aria-label={t.org.palette}>
-        <h4>{t.org.palette}</h4>
-        <p className="faint small">{t.org.paletteHint}</p>
-        <div className="org-roles">
-          {palette.map((r) => (
-            <button
-              key={r.title}
-              type="button"
-              className="org-role"
-              draggable
-              title={t.org.hireRole(r.title)}
-              onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = 'copy'
-                // A private type: dropping a role on a text field elsewhere inserts nothing.
-                e.dataTransfer.setData(ROLE_MIME, r.title)
-                setHiring(true)
-              }}
-              onDragEnd={() => {
-                setHiring(false)
-                setOver(null)
-              }}
-              onClick={() => hire(r, headFor(agents, r.department))}
-            >
-              <span className="ellipsis">{r.title}</span>
-              {r.department && <small className="ellipsis">{r.department}</small>}
-            </button>
-          ))}
-        </div>
-      </aside>
+    <div className={`org ${paletteOpen ? '' : 'bare'}`}>
+      {paletteOpen && (
+        <aside className="org-palette" aria-label={t.org.palette}>
+          <h4>{t.org.palette}</h4>
+          <div className="org-roles">
+            {byDepartment(palette).map(([dept, list]) => (
+              <section key={dept}>
+                <h5>{dept || t.org.otherRoles}</h5>
+                {list.map((r) => (
+                  <button
+                    key={r.title}
+                    type="button"
+                    className="org-role"
+                    draggable
+                    title={t.org.hireRole(r.title)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = 'copy'
+                      // A private type: dropping a role on a text field elsewhere inserts nothing.
+                      e.dataTransfer.setData(ROLE_MIME, r.title)
+                      setHiring(true)
+                    }}
+                    onDragEnd={() => {
+                      setHiring(false)
+                      setOver(null)
+                    }}
+                    onClick={() => hire(r, headFor(agents, r.department))}
+                  >
+                    <span className="ellipsis">{r.title}</span>
+                    <Icon name="grip" size={12} />
+                  </button>
+                ))}
+              </section>
+            ))}
+          </div>
+          <p className="org-palette-hint">{t.org.paletteHint}</p>
+        </aside>
+      )}
 
       <div className="org-main">
         <div className="org-meta">
           {link ? t.org.linkHint : hiring ? t.org.dropHint : t.team.summary(agents.length, depts)}
         </div>
         <div className="org-tools" role="toolbar" aria-label={t.org.view}>
+          <button className="btn quiet sm" aria-pressed={paletteOpen} onClick={togglePalette}>
+            <Icon name="users" size={14} /> {t.org.palette}
+          </button>
+          <span className="org-tools-sep" aria-hidden />
           <button className="btn quiet icon sm" onClick={() => setZoom((z) => clampZoom(z - ZOOM.step))} disabled={zoom <= ZOOM.min} title={t.org.zoomOut} aria-label={t.org.zoomOut}>
             <Icon name="minus" size={14} />
           </button>

@@ -150,6 +150,13 @@ const HEADS: [RegExp, Exec][] = [
   [/^(operations|hr|support|leadership)$/i, 'coo']
 ]
 
+/** Roles under their department, departments in the order they first appear. */
+export function byDepartment(roles: Role[]): [string, Role[]][] {
+  const groups = new Map<string, Role[]>()
+  for (const r of roles) groups.set(r.department, [...(groups.get(r.department) ?? []), r])
+  return [...groups]
+}
+
 /** A role by title: a built-in one, or a plugin role (document tools; the department comes from the manager). */
 export function roleFrom(title: string, pluginRoles: RoleTemplate[] = []): Role | undefined {
   const plugin = pluginRoles.find((x) => same(x.title, title))

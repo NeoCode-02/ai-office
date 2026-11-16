@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, OfficeEvent } from '../../shared/types'
-import { autoLayout, belowOf, buildTree, CARD, canDrag, canMoveUnder, liveStatus, maxTokensFrom, moveUnder, orgProblem, sameJson, subtreeOf, type OrgNode } from './orgchart'
+import { autoLayout, belowOf, buildTree, CARD, canDrag, canMoveUnder, edgePath, liveStatus, maxTokensFrom, moveUnder, orgProblem, sameJson, subtreeOf, type OrgNode } from './orgchart'
 
 const agent = (id: string, reportsTo: string | null, extra: Partial<Agent> = {}): Agent => ({
   id,
@@ -48,6 +48,16 @@ describe('autoLayout', () => {
       if (a === b) continue
       expect(Math.abs(a.x - b.x) >= CARD.w || Math.abs(a.y - b.y) >= CARD.h, JSON.stringify([a, b])).toBe(true)
     }
+  })
+
+  it('draws a line as a rounded elbow, and as a straight drop when the report is right below', () => {
+    const boss = { x: 0, y: 0 }
+    const mid = CARD.h + 32
+    expect(edgePath(boss, { x: 0, y: CARD.h + 64 })).toBe(`M100 ${CARD.h} V${mid} Q100 ${mid} 100 ${mid} H100 Q100 ${mid} 100 ${mid} V${CARD.h + 64}`)
+    expect(edgePath(boss, { x: 300, y: CARD.h + 64 })).toBe(`M100 ${CARD.h} V${mid - 10} Q100 ${mid} 110 ${mid} H390 Q400 ${mid} 400 ${mid + 10} V${CARD.h + 64}`)
+    // The same commands whatever the positions (a report placed above its manager too), so lines can animate.
+    const shape = (d: string) => d.replace(/[-\d. ]+/g, '')
+    expect(shape(edgePath(boss, { x: -500, y: -300 }))).toBe(shape(edgePath(boss, { x: 300, y: 156 })))
   })
 
   it('places a new report one row below its manager, next to the ones already there', () => {

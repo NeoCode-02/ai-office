@@ -140,7 +140,6 @@ export default function Settings({ project, onSave, onDelete, notify, onDirty }:
       <div className="page-head">
         <div>
           <h2>{t.office.title}</h2>
-          <p>{t.office.subtitle}</p>
         </div>
       </div>
 
@@ -155,7 +154,7 @@ export default function Settings({ project, onSave, onDelete, notify, onDirty }:
         </div>
         <FolderField value={form.workspaceDir} onChange={(v) => set('workspaceDir', v)} />
         <Field label={t.office.briefing} hint={t.office.briefingHint}>
-          <textarea className="textarea" rows={10} value={form.briefing} onChange={(e) => set('briefing', e.target.value)} placeholder={t.office.briefingPlaceholder} />
+          <textarea className="textarea grow" rows={5} value={form.briefing} onChange={(e) => set('briefing', e.target.value)} placeholder={t.office.briefingPlaceholder} />
         </Field>
       </div>
 
