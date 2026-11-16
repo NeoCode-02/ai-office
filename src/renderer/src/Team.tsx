@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 import type { Agent, Effort, McpServer, Price, Project, Provider, RoleTemplate, Skill, ToolName } from '../../shared/types'
 import type { Live } from './App'
 import { errText, useT } from './i18n'
@@ -142,6 +142,9 @@ function sizeOf(agents: Agent[], auto: Map<string, Point>) {
   return { w: w + PAD * 2, h: h + PAD * 2 }
 }
 
+/** A path both as the attribute and as the CSS `d` property, which is the one that can animate. */
+const line = (d: string) => ({ d, style: { d: `path("${d}")` } as CSSProperties })
+
 /** The member card under a screen point, if any. */
 const memberAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest('[data-member]')?.getAttribute('data-member') ?? null
 
@@ -186,6 +189,8 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
   /** The card a line or a role from the palette would land on. */
   const [over, setOver] = useState<string | null>(null)
   const [hiring, setHiring] = useState(false)
+  /** Cards, lines and zoom glide to their new place (tidy up, fit, zoom buttons); never while dragging. */
+  const [settling, setSettling] = useState(false)
   const dirty = !sameJson(agents, project.agents)
   useEffect(() => onDirty?.(dirty), [dirty, onDirty])
   const agent = agents.find((a) => a.id === sel)
@@ -199,6 +204,9 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
   const plane = useRef<HTMLDivElement>(null)
   /** The last pointer gesture on a card moved it: the click that follows is not a selection. */
   const moved = useRef(false)
+  /** Where a wheel zoom started: the pointer on screen and the point of the chart under it. */
+  const anchor = useRef<{ x: number; y: number; wx: number; wy: number } | null>(null)
+  const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   // Start with the CEO in view when the chart is wider than the window.
   useEffect(() => {
@@ -213,11 +221,28 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return
       e.preventDefault()
-      setZoom((z) => clampZoom(z - Math.sign(e.deltaY) * ZOOM.step))
+      const next = clampZoom(zoom - Math.sign(e.deltaY) * ZOOM.step)
+      if (next === zoom) return
+      const r = plane.current!.getBoundingClientRect()
+      anchor.current = { x: e.clientX, y: e.clientY, wx: (e.clientX - r.left) / zoom, wy: (e.clientY - r.top) / zoom }
+      setZoom(next)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [])
+  }, [zoom])
+
+  // Once the new zoom is laid out, scroll so the point that was under the pointer still is.
+  useLayoutEffect(() => {
+    const a = anchor.current
+    const el = canvas.current
+    if (!a || !el) return
+    anchor.current = null
+    const r = plane.current!.getBoundingClientRect()
+    el.scrollLeft += r.left + a.wx * zoom - a.x
+    el.scrollTop += r.top + a.wy * zoom - a.y
+  }, [zoom])
+
+  useEffect(() => () => clearTimeout(settleTimer.current), [])
 
   useEffect(() => {
     void window.office.listMcp().then((m) => setMcp(m.filter((x) => x.enabled)), () => undefined)
@@ -383,9 +408,15 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
     }
   }
 
+  const settle = (change: () => void) => {
+    setSettling(true)
+    change()
+    clearTimeout(settleTimer.current)
+    settleTimer.current = setTimeout(() => setSettling(false), 260)
+  }
   const fit = () => {
     const el = canvas.current
-    if (el) setZoom(clampZoom(Math.floor(Math.min(el.clientWidth / size.w, el.clientHeight / size.h) * 10) / 10))
+    if (el) settle(() => setZoom(clampZoom(Math.floor(Math.min(el.clientWidth / size.w, el.clientHeight / size.h) * 10) / 10)))
   }
   const arranged = agents.some((a) => a.pos)
   const depts = new Set(agents.map((a) => a.department).filter(Boolean)).size
@@ -447,18 +478,18 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
             <Icon name="users" size={14} /> {t.org.palette}
           </button>
           <span className="org-tools-sep" aria-hidden />
-          <button className="btn quiet icon sm" onClick={() => setZoom((z) => clampZoom(z - ZOOM.step))} disabled={zoom <= ZOOM.min} title={t.org.zoomOut} aria-label={t.org.zoomOut}>
+          <button className="btn quiet icon sm" onClick={() => settle(() => setZoom((z) => clampZoom(z - ZOOM.step)))} disabled={zoom <= ZOOM.min} title={t.org.zoomOut} aria-label={t.org.zoomOut}>
             <Icon name="minus" size={14} />
           </button>
-          <button className="btn quiet sm num" onClick={() => setZoom(1)} title={t.org.zoomReset}>{Math.round(zoom * 100)}%</button>
-          <button className="btn quiet icon sm" onClick={() => setZoom((z) => clampZoom(z + ZOOM.step))} disabled={zoom >= ZOOM.max} title={t.org.zoomIn} aria-label={t.org.zoomIn}>
+          <button className="btn quiet sm num" onClick={() => settle(() => setZoom(1))} title={t.org.zoomReset}>{Math.round(zoom * 100)}%</button>
+          <button className="btn quiet icon sm" onClick={() => settle(() => setZoom((z) => clampZoom(z + ZOOM.step)))} disabled={zoom >= ZOOM.max} title={t.org.zoomIn} aria-label={t.org.zoomIn}>
             <Icon name="plus" size={14} />
           </button>
           <button className="btn quiet icon sm" onClick={fit} title={t.org.fit} aria-label={t.org.fit}>
             <Icon name="fit" size={14} />
           </button>
           {arranged && (
-            <button className="btn quiet sm" onClick={() => setAgents((all) => all.map(({ pos, ...a }) => a))} title={t.org.tidyHint}>
+            <button className="btn quiet sm" onClick={() => settle(() => setAgents((all) => all.map(({ pos, ...a }) => a)))} title={t.org.tidyHint}>
               {t.org.tidy}
             </button>
           )}
@@ -472,12 +503,12 @@ export default function Team({ project, providers, live, onSave, notify, onDirty
           onDrop={roleDrop}
         >
           <div className="org-plane" ref={plane} style={{ width: size.w * zoom, height: size.h * zoom }}>
-            <div className="org-world" style={{ width: size.w, height: size.h, transform: `scale(${zoom})` }}>
+            <div className={`org-world ${settling ? 'settling' : ''}`} style={{ width: size.w, height: size.h, transform: `scale(${zoom})` }}>
               <svg className="org-edges" width={size.w} height={size.h} aria-hidden>
                 <g transform={`translate(${PAD} ${PAD})`}>
                   {agents.map((a) => {
                     const boss = a.reportsTo ? byId.get(a.reportsTo) : undefined
-                    return boss ? <path key={a.id} d={edgePath(at(boss), at(a))} className={sel === a.id || sel === boss.id ? 'on' : undefined} /> : null
+                    return boss ? <path key={a.id} {...line(edgePath(at(boss), at(a)))} className={sel === a.id || sel === boss.id ? 'on' : undefined} /> : null
                   })}
                   {link && byId.get(link.from) && <path className="temp" d={edgePath(at(byId.get(link.from)!), { x: link.to.x - CARD.w / 2, y: link.to.y })} />}
                 </g>

@@ -8,6 +8,11 @@
 /* Keep Save reachable while a member's sheet is open: centre the bar between the palette and the sheet. */
 .org > .savebar { left: calc(var(--palette) + (100% - var(--palette)) / 2); }
 .org:has(> .sheet) > .savebar { left: calc(var(--palette) + (100% - var(--palette) - min(420px, 92%)) / 2); }
+/* A narrow window has no room for the palette, the canvas and a member's sheet: the palette waits. */
+@media (max-width: 1180px) {
+  .org:has(> .sheet) { --palette: 0px; }
+  .org:has(> .sheet) > .org-palette { display: none; }
+}
 
 /* ---------- model field with its reload button ---------- */
 .model-input { position: relative; min-width: 0; }

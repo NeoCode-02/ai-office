@@ -130,6 +130,7 @@ p { margin: 0; text-wrap: pretty; }
 .layer { position: absolute; inset: 0; }
 .pane { position: absolute; inset: 0; overflow: auto; }
 .layer[inert], .pane[inert] { visibility: hidden; }
+.layer:not([inert]), .pane:not([inert]) { animation: fade 0.14s var(--ease); }
 .tab .dot.unsaved { width: 6px; height: 6px; background: var(--accent); }
 
 .page { max-width: 760px; margin: 0 auto; padding: 40px 32px 72px; }
@@ -285,7 +286,7 @@ details.more[open] > summary svg { transform: rotate(90deg); }
 .org-palette { width: var(--palette); flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface); }
 .org-palette > h4 { padding: 16px 14px 4px; font-size: 13px; font-weight: 600; }
 .org-roles { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 10px; }
-.org-roles h5 { padding: 12px 8px 4px; font-size: 11.5px; font-weight: 500; color: var(--text-2); }
+.org-roles h5 { margin: 0; padding: 12px 8px 4px; font-size: 11.5px; font-weight: 500; color: var(--text-2); }
 .org-role { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font-size: 13px; text-align: left; cursor: grab; transition: background 0.12s; }
 .org-role svg { flex-shrink: 0; color: var(--text-3); opacity: 0; transition: opacity 0.12s; }
 .org-role:hover, .org-role:focus-visible { background: var(--sunken); }
@@ -293,7 +294,7 @@ details.more[open] > summary svg { transform: rotate(90deg); }
 .org-role:active { cursor: grabbing; }
 .org-palette-hint { padding: 10px 14px 14px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.5; color: var(--text-2); }
 .org-main { flex: 1; min-width: 0; position: relative; }
-.org-canvas { height: 100%; overflow: auto; cursor: grab; user-select: none; touch-action: none; background-image: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0); background-size: 22px 22px; }
+.org-canvas { height: 100%; padding-top: 24px; overflow: auto; display: flex; justify-content: safe center; align-items: flex-start; cursor: grab; user-select: none; touch-action: none; background-image: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0); background-size: 22px 22px; }
 .org-canvas:active { cursor: grabbing; }
 .org-canvas.linking, .org-canvas.linking .node { cursor: crosshair; }
 .org-meta { position: absolute; top: 16px; left: 24px; z-index: 2; font-size: 12.5px; color: var(--text-3); }
@@ -301,8 +302,11 @@ details.more[open] > summary svg { transform: rotate(90deg); }
 .org-tools .num { min-width: 48px; }
 .org-tools .btn[aria-pressed='true'] { background: var(--sunken); color: var(--text); }
 .org-tools-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line); }
-.org-plane { position: relative; min-width: 100%; min-height: 100%; }
+.org-plane { position: relative; flex-shrink: 0; }
 .org-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.org-world.settling { transition: transform 0.22s var(--ease); }
+.org-world.settling .org-card { transition: left 0.22s var(--ease), top 0.22s var(--ease); }
+.org-world.settling .org-edges path { transition: d 0.22s var(--ease); }
 .org-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 .org-edges path { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
 .org-edges path.on { stroke: var(--accent); }
