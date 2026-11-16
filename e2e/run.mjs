@@ -176,6 +176,27 @@ try {
     await until('Create office', clickText, 'Create office')
     // Every office starts with its five executives on the Team canvas.
     await until('the executives', () => [...document.querySelectorAll('.node-title')].map((e) => e.textContent.trim()).sort().join() === 'CEO,CFO,CMO,COO,CTO')
+    // Hire from the palette (an engineer goes to the CTO), then draw a line from the CFO onto them.
+    await until('the palette', () => {
+      const b = [...document.querySelectorAll('.org-role')].find((x) => x.textContent.startsWith('QA Engineer'))
+      b?.click()
+      return Boolean(b)
+    })
+    await until('six cards and five lines', () => document.querySelectorAll('.org-card').length === 6 && document.querySelectorAll('.org-edges path').length === 5)
+    const centre = (r) => ({ x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) })
+    const rects = await inPage(() => {
+      const card = (title) => [...document.querySelectorAll('.org-card')].find((c) => c.querySelector('.node-title')?.textContent.trim() === title)
+      document.querySelector('.sheet button[aria-label="Close"]')?.click()
+      const box = (el) => el.getBoundingClientRect().toJSON()
+      return { port: box(card('CFO').querySelector('.org-port')), qa: box(card('QA Engineer').querySelector('.node')) }
+    })
+    const from = centre(rects.port)
+    const to = centre(rects.qa)
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...from })
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...from })
+    for (let i = 1; i <= 5; i++) await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x: from.x + ((to.x - from.x) * i) / 5, y: from.y + ((to.y - from.y) * i) / 5 })
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...to })
+    await until('the new reporting line', hasText, 'now reports to Lena')
     await until('the Work tab', () => {
       const tab = [...document.querySelectorAll('[role=tab]')].find((x) => x.textContent.trim() === 'Work')
       tab?.click()

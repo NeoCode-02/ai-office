@@ -23,6 +23,46 @@ export function buildTree(agents: Agent[]): OrgNode[] {
   return roots
 }
 
+export interface Point {
+  x: number
+  y: number
+}
+
+/** Card size and spacing on the team canvas (CSS uses the same card size). */
+export const CARD = { w: 200, h: 92 }
+const GAP = { x: 28, y: 64 }
+
+/**
+ * Default card positions: each leaf gets its own column, a manager sits centred over their reports,
+ * one row per level. Cards never overlap.
+ */
+export function autoLayout(agents: Agent[]): Map<string, Point> {
+  const out = new Map<string, Point>()
+  let column = 0
+  const place = (n: OrgNode, depth: number): number => {
+    const xs = n.kids.map((k) => place(k, depth + 1))
+    const x = xs.length ? (xs[0] + xs[xs.length - 1]) / 2 : column++ * (CARD.w + GAP.x)
+    out.set(n.agent.id, { x, y: depth * (CARD.h + GAP.y) })
+    return x
+  }
+  for (const root of buildTree(agents)) place(root, 0)
+  return out
+}
+
+/** Where a new report of `boss` goes: one row below, right of the reports already there. */
+export function belowOf(boss: Point, reports: number): Point {
+  return { x: boss.x + reports * (CARD.w + GAP.x), y: boss.y + CARD.h + GAP.y }
+}
+
+/** A manager → report line: from the bottom middle of one card to the top middle of the other. */
+export function edgePath(from: Point, to: Point): string {
+  const x1 = from.x + CARD.w / 2
+  const y1 = from.y + CARD.h
+  const x2 = to.x + CARD.w / 2
+  const bend = Math.max(30, Math.abs(to.y - y1) / 2)
+  return `M${x1} ${y1} C${x1} ${y1 + bend} ${x2} ${to.y - bend} ${x2} ${to.y}`
+}
+
 /** The member and everyone below them. Safe on reporting loops. */
 export function subtreeOf(agents: Agent[], id: string): Set<string> {
   const out = new Set<string>()

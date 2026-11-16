@@ -150,6 +150,17 @@ const HEADS: [RegExp, Exec][] = [
   [/^(operations|hr|support|leadership)$/i, 'coo']
 ]
 
+/** A role by title: a built-in one, or a plugin role (document tools; the department comes from the manager). */
+export function roleFrom(title: string, pluginRoles: RoleTemplate[] = []): Role | undefined {
+  const plugin = pluginRoles.find((x) => same(x.title, title))
+  return roleByTitle(title) ?? (plugin && { title: plugin.title, department: '', tools: [...DOCS], instructions: plugin.instructions })
+}
+
+/** The role "+" on a card hires: the first staff role of that executive's department, else an engineer. */
+export function starterRole(agents: Agent[], boss: Agent): Role {
+  return STAFF_ROLES.find((r) => headFor(agents, r.department)?.id === boss.id) ?? R('Software Engineer')
+}
+
 /** Who a new member of `department` reports to when dropped on empty canvas: their executive, else the CEO. */
 export function headFor(agents: Agent[], department: string): Agent | undefined {
   const kind = HEADS.find(([re]) => re.test(department.trim()))?.[1] ?? 'ceo'

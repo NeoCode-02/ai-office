@@ -6,6 +6,8 @@ import { rovingStep } from './shellUtils'
 
 const PATHS = {
   plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
+  fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   x: 'M18 6 6 18M6 6l12 12',
   arrowUp: 'M12 19V5M5 12l7-7 7 7',
   stop: 'M7 7h10v10H7z',

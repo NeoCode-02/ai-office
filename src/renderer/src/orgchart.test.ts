@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, OfficeEvent } from '../../shared/types'
-import { buildTree, canDrag, canMoveUnder, liveStatus, maxTokensFrom, moveUnder, orgProblem, sameJson, subtreeOf, type OrgNode } from './orgchart'
+import { autoLayout, belowOf, buildTree, CARD, canDrag, canMoveUnder, liveStatus, maxTokensFrom, moveUnder, orgProblem, sameJson, subtreeOf, type OrgNode } from './orgchart'
 
 const agent = (id: string, reportsTo: string | null, extra: Partial<Agent> = {}): Agent => ({
   id,
@@ -32,6 +32,27 @@ describe('buildTree', () => {
   it('shows members in a reporting loop once instead of hiding them or looping forever', () => {
     const tree = buildTree([agent('ceo', null), agent('a', 'b'), agent('b', 'a'), agent('self', 'self')])
     expect(shape(tree)).toEqual(['ceo', { a: ['b'] }, 'self'])
+  })
+})
+
+describe('autoLayout', () => {
+  it('puts managers above and centred over their reports, with no two cards overlapping', () => {
+    const pos = autoLayout(team())
+    const at = (id: string) => pos.get(id)!
+    expect(at('ceo').y).toBeLessThan(at('cto').y)
+    expect(at('cto').y).toBeLessThan(at('dev').y)
+    expect(at('cto').x).toBe(at('dev').x)
+    expect(at('ceo').x).toBe((at('cto').x + at('mkt').x) / 2)
+    const cards = [...pos.values()]
+    for (const a of cards) for (const b of cards) {
+      if (a === b) continue
+      expect(Math.abs(a.x - b.x) >= CARD.w || Math.abs(a.y - b.y) >= CARD.h, JSON.stringify([a, b])).toBe(true)
+    }
+  })
+
+  it('places a new report one row below its manager, next to the ones already there', () => {
+    expect(belowOf({ x: 100, y: 0 }, 0)).toEqual({ x: 100, y: CARD.h + 64 })
+    expect(belowOf({ x: 100, y: 0 }, 2).x).toBeGreaterThan(100 + CARD.w)
   })
 })
 

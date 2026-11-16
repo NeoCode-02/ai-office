@@ -1,13 +1,13 @@
-import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 import type { Agent, Effort, McpServer, Price, Project, Provider, RoleTemplate, Skill, ToolName } from '../../shared/types'
 import type { Live } from './App'
 import { errText, useT } from './i18n'
 import { createModelCache } from './modelList'
 import { latestProject } from './officeForm'
-import { buildTree, canDrag, canMoveUnder, liveStatus, maxTokensFrom, moveUnder, orgProblem, sameJson, subtreeOf, type OrgNode } from './orgchart'
-import { changeRole, newAgent, roleDefaults, ROLES, uid } from './roles'
+import { autoLayout, belowOf, CARD, canMoveUnder, edgePath, liveStatus, maxTokensFrom, moveUnder, orgProblem, sameJson, subtreeOf, type Point } from './orgchart'
+import { changeRole, headFor, newAgent, roleByTitle, roleDefaults, roleFrom, ROLES, STAFF_ROLES, starterRole, uid, type Role } from './roles'
 import { isOpenRouter, num } from './Pricing'
-import { Avatar, ConfirmButton, Empty, Field, Icon, Sheet } from './ui'
+import { Avatar, ConfirmButton, Field, Icon, Sheet } from './ui'
 
 const EDITABLE: ToolName[] = ['list_files', 'read_file', 'search_files', 'write_file', 'edit_file', 'run_command', 'web_fetch']
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -108,6 +108,29 @@ function Group({ label, hint, children }: { label: string; hint?: ReactNode; chi
   )
 }
 
+const ROLE_MIME = 'application/x-ai-office-role'
+/** Room around the cards inside the canvas. */
+const PAD = 40
+const ZOOM = { min: 0.4, max: 1.5, step: 0.1 }
+const clampZoom = (z: number) => Math.round(Math.min(ZOOM.max, Math.max(ZOOM.min, z)) * 10) / 10
+
+/** The member card under a screen point, if any. */
+const memberAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest('[data-member]')?.getAttribute('data-member') ?? null
+
+/** Follows the pointer until it is released; `done` is false when the gesture was cancelled. */
+function follow(move: (e: globalThis.PointerEvent) => void, end: (e: globalThis.PointerEvent, done: boolean) => void) {
+  const onMove = (e: globalThis.PointerEvent) => move(e)
+  const onEnd = (e: globalThis.PointerEvent) => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onEnd)
+    window.removeEventListener('pointercancel', onEnd)
+    end(e, e.type === 'pointerup')
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onEnd)
+  window.addEventListener('pointercancel', onEnd)
+}
+
 interface Props {
   project: Project
   providers: Provider[]
@@ -125,18 +148,53 @@ export default function Team({ project, providers, live, onSave, notify }: Props
   const [mcp, setMcp] = useState<McpServer[]>([])
   const [pluginRoles, setPluginRoles] = useState<RoleTemplate[]>([])
   const [skills, setSkills] = useState<{ list: Skill[]; error?: unknown } | null>(null)
-  const [drag, setDrag] = useState<string | null>(null)
+  const [zoom, setZoom] = useState(1)
+  /** A line being drawn from a manager's port; `to` is the pointer in canvas units. */
+  const [link, setLink] = useState<{ from: string; to: Point } | null>(null)
+  /** The card a line or a role from the palette would land on. */
   const [over, setOver] = useState<string | null>(null)
+  const [hiring, setHiring] = useState(false)
   const dirty = !sameJson(agents, project.agents)
   const agent = agents.find((a) => a.id === sel)
   const status = useMemo(() => liveStatus(live?.events), [live?.events])
-  const chart = useMemo(() => buildTree(agents), [agents])
+  const auto = useMemo(() => autoLayout(agents), [agents])
+  const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents])
+  const at = (a: Agent): Point => a.pos ?? auto.get(a.id) ?? { x: 0, y: 0 }
+  const size = useMemo(() => {
+    let w = 0
+    let h = 0
+    for (const a of agents) {
+      const p = a.pos ?? auto.get(a.id)
+      if (p) {
+        w = Math.max(w, p.x + CARD.w)
+        h = Math.max(h, p.y + CARD.h)
+      }
+    }
+    return { w: w + PAD * 2, h: h + PAD * 2 }
+  }, [agents, auto])
 
   const canvas = useRef<HTMLDivElement>(null)
+  const plane = useRef<HTMLDivElement>(null)
+  /** The last pointer gesture on a card moved it: the click that follows is not a selection. */
+  const moved = useRef(false)
+
   // Start with the CEO in view when the chart is wider than the window.
   useEffect(() => {
     const el = canvas.current
     if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2
+  }, [])
+
+  // Ctrl + wheel zooms; React's wheel listener is passive, so the page zoom can't be prevented there.
+  useEffect(() => {
+    const el = canvas.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      setZoom((z) => clampZoom(z - Math.sign(e.deltaY) * ZOOM.step))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
   useEffect(() => {
@@ -150,13 +208,19 @@ export default function Team({ project, providers, live, onSave, notify }: Props
 
   const update = (patch: Partial<Agent>) => setAgents((all) => all.map((a) => (a.id === sel ? { ...a, ...patch } : a)))
 
-  const add = (boss: Agent | undefined) => {
-    const base = boss ?? agents[0]
-    const role = boss ? ROLES.find((r) => r.title === 'Software Engineer')! : ROLES[0]
-    const used = new Set(agents.map((a) => a.name))
-    const name = t.names.find((n) => !used.has(n)) ?? `${t.names[0]} ${agents.length + 1}`
-    const a = newAgent(name, role, boss?.id ?? null, base?.providerId, base?.model)
-    a.department = boss?.department || a.department
+  /** Pointer position in canvas units (the same units as `pos`). */
+  const toWorld = (clientX: number, clientY: number): Point => {
+    const r = plane.current!.getBoundingClientRect()
+    return { x: (clientX - r.left) / zoom - PAD, y: (clientY - r.top) / zoom - PAD }
+  }
+
+  const hire = (role: Role, boss: Agent | undefined, pos?: Point) => {
+    if (!boss) return
+    const used = new Set(agents.map((a) => a.name.trim().toLowerCase()))
+    const name = t.names.find((n) => !used.has(n.toLowerCase())) ?? `${t.names[0]} ${agents.length + 1}`
+    const a = newAgent(name, role, boss.id, boss.providerId, boss.model)
+    a.department = role.department || boss.department
+    a.pos = pos ?? belowOf(at(boss), agents.filter((x) => x.reportsTo === boss.id).length)
     setAgents((all) => [...all, a])
     setSel(a.id)
   }
@@ -168,7 +232,6 @@ export default function Team({ project, providers, live, onSave, notify }: Props
     const copy: Agent = {
       ...a,
       exec: undefined,
-      pos: undefined,
       id: uid(),
       name: `${a.name} ${n}`,
       // A copy of the top executive becomes their deputy: there can be only one top.
@@ -176,7 +239,8 @@ export default function Team({ project, providers, live, onSave, notify }: Props
       tools: [...a.tools],
       mcpServers: a.mcpServers && [...a.mcpServers],
       skills: a.skills && [...a.skills],
-      backup: a.backup && { ...a.backup }
+      backup: a.backup && { ...a.backup },
+      pos: { x: at(a).x + 24, y: at(a).y + 24 }
     }
     setAgents((all) => [...all, copy])
     setSel(copy.id)
@@ -203,87 +267,100 @@ export default function Team({ project, providers, live, onSave, notify }: Props
     }
   }
 
-  // Drag a card onto another one to change the manager. The manager field in the sheet does the same from the keyboard.
-  const endDrag = () => {
-    setDrag(null)
-    setOver(null)
-  }
-  const accept = (e: DragEvent, a: Agent) => {
-    if (!drag || !canMoveUnder(agents, drag, a.id)) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (over !== a.id) setOver(a.id)
-  }
-  const dropProps = (a: Agent) => ({
-    draggable: canDrag(agents, a.id),
-    onDragStart: (e: DragEvent) => {
-      e.dataTransfer.effectAllowed = 'move'
-      // A private type: dropping a member on a text field elsewhere inserts nothing.
-      e.dataTransfer.setData('application/x-ai-office-member', a.id)
-      setDrag(a.id)
-    },
-    onDragEnd: endDrag,
-    onDragEnter: (e: DragEvent) => accept(e, a),
-    onDragOver: (e: DragEvent) => accept(e, a),
-    onDragLeave: (e: DragEvent) => {
-      if (over === a.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(null)
-    },
-    onDrop: (e: DragEvent) => {
-      e.preventDefault()
-      if (drag && canMoveUnder(agents, drag, a.id)) {
-        const who = agents.find((x) => x.id === drag)
-        setAgents((all) => moveUnder(all, drag, a.id))
-        if (who) notify(t.org.moved(who.name, a.name))
-      }
-      endDrag()
-    }
-  })
+  // --- pointer gestures: move a card, draw a manager → report line, pan the canvas ---
 
-  // A manager can't report to someone in their own subtree.
-  const subtree = useMemo(() => (sel ? subtreeOf(agents, sel) : new Set<string>()), [agents, sel])
-
-  const depts = new Set(agents.map((a) => a.department).filter(Boolean)).size
-  const roles = [...ROLES.map((r) => r.title), ...pluginRoles.map((r) => r.title)]
-
-  const tree = (nodes: OrgNode[], top: boolean) => {
-    if (!nodes.length) return null
-    return (
-      <ul className={top ? 'tree' : undefined}>
-        {nodes.map(({ agent: a, kids }) => {
-          const st = status.get(a.id)
-          return (
-            <li key={a.id}>
-              <div className="node-wrap">
-                <button
-                  className={`node ${sel === a.id ? 'on' : ''} ${drag === a.id ? 'dragging' : ''} ${over === a.id ? 'drop' : ''}`}
-                  onClick={() => setSel(a.id)}
-                  {...dropProps(a)}
-                >
-                  <div className="row">
-                    <Avatar name={a.name} seed={a.id} size={32} status={st} />
-                    <div className="ellipsis">
-                      <div className="node-name ellipsis">{a.name}</div>
-                      <div className="node-title ellipsis">{a.title}</div>
-                    </div>
-                    {!a.reportsTo && <Icon name="crown" size={13} className="faint" />}
-                  </div>
-                  <div className="node-foot">
-                    <span className="ellipsis">{a.department || '—'}</span>
-                    <span className="ellipsis mono">{a.model || '—'}</span>
-                  </div>
-                  {st && st !== 'idle' && <span className="org-sr">{t.work.status[st]}</span>}
-                </button>
-                <button className="node-add" onClick={() => add(a)} title={t.team.addReport(a.name)} aria-label={t.team.addReport(a.name)}>
-                  <Icon name="plus" size={13} />
-                </button>
-              </div>
-              {tree(kids, false)}
-            </li>
-          )
-        })}
-      </ul>
+  const startMove = (e: PointerEvent, a: Agent) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    const start = at(a)
+    const sx = e.clientX
+    const sy = e.clientY
+    moved.current = false
+    follow(
+      (ev) => {
+        const dx = (ev.clientX - sx) / zoom
+        const dy = (ev.clientY - sy) / zoom
+        if (!moved.current && Math.hypot(dx, dy) < 4) return
+        moved.current = true
+        const pos = { x: Math.max(0, Math.round(start.x + dx)), y: Math.max(0, Math.round(start.y + dy)) }
+        setAgents((all) => all.map((x) => (x.id === a.id ? { ...x, pos } : x)))
+      },
+      () => undefined
     )
   }
+
+  const startLink = (e: PointerEvent, boss: Agent) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    setLink({ from: boss.id, to: toWorld(e.clientX, e.clientY) })
+    follow(
+      (ev) => {
+        setLink({ from: boss.id, to: toWorld(ev.clientX, ev.clientY) })
+        const id = memberAt(ev.clientX, ev.clientY)
+        setOver(id && canMoveUnder(agents, id, boss.id) ? id : null)
+      },
+      (ev, done) => {
+        setLink(null)
+        setOver(null)
+        const id = done ? memberAt(ev.clientX, ev.clientY) : null
+        const who = id ? byId.get(id) : undefined
+        if (!who || who.id === boss.id || who.reportsTo === boss.id) return
+        if (!canMoveUnder(agents, who.id, boss.id)) return notify(t.org.cantLink(who.name, boss.name))
+        setAgents((all) => moveUnder(all, who.id, boss.id))
+        notify(t.org.moved(who.name, boss.name))
+      }
+    )
+  }
+
+  const startPan = (e: PointerEvent) => {
+    if (e.button !== 0 || (e.target as Element).closest('[data-member]')) return
+    const el = canvas.current!
+    const sx = e.clientX
+    const sy = e.clientY
+    const left = el.scrollLeft
+    const top = el.scrollTop
+    let panned = false
+    follow(
+      (ev) => {
+        panned ||= Math.hypot(ev.clientX - sx, ev.clientY - sy) > 3
+        el.scrollLeft = left - (ev.clientX - sx)
+        el.scrollTop = top - (ev.clientY - sy)
+      },
+      () => !panned && setSel(null)
+    )
+  }
+
+  // --- roles dragged in from the palette (HTML5 drag and drop) ---
+
+  const roleOver = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes(ROLE_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    const id = memberAt(e.clientX, e.clientY)
+    if (id !== over) setOver(id)
+  }
+  const roleDrop = (e: DragEvent) => {
+    const role = roleFrom(e.dataTransfer.getData(ROLE_MIME), pluginRoles)
+    setOver(null)
+    setHiring(false)
+    if (!role) return
+    e.preventDefault()
+    const onto = byId.get(memberAt(e.clientX, e.clientY) ?? '')
+    const p = toWorld(e.clientX, e.clientY)
+    hire(role, onto ?? headFor(agents, role.department), onto ? undefined : { x: Math.max(0, Math.round(p.x - CARD.w / 2)), y: Math.max(0, Math.round(p.y - CARD.h / 2)) })
+  }
+
+  const fit = () => {
+    const el = canvas.current
+    if (el) setZoom(clampZoom(Math.floor(Math.min(el.clientWidth / size.w, el.clientHeight / size.h) * 10) / 10))
+  }
+  const arranged = agents.some((a) => a.pos)
+  const depts = new Set(agents.map((a) => a.department).filter(Boolean)).size
+  const roles = [...ROLES.map((r) => r.title), ...pluginRoles.map((r) => r.title)]
+  const palette = [...STAFF_ROLES, ...pluginRoles.map((r) => roleFrom(r.title, pluginRoles)!).filter((r) => !roleByTitle(r.title))]
+  // A manager can't report to someone in their own subtree.
+  const subtree = useMemo(() => (sel ? subtreeOf(agents, sel) : new Set<string>()), [agents, sel])
 
   const reports = agent ? agents.filter((a) => a.reportsTo === agent.id).length : 0
   const boss = agent?.reportsTo ? agents.find((a) => a.id === agent.reportsTo) : undefined
@@ -292,26 +369,114 @@ export default function Team({ project, providers, live, onSave, notify }: Props
 
   return (
     <div className="org">
-      <div className="org-meta">
-        {drag ? (
-          t.org.dropHint
-        ) : (
-          <>
-            {t.team.summary(agents.length, depts)}
-            {agents.length > 1 && <span className="org-hint"> · {t.org.dragHint}</span>}
-          </>
-        )}
-      </div>
-      <div className="org-canvas" ref={canvas} onClick={(e) => e.target === e.currentTarget && setSel(null)}>
-        {agents.length ? (
-          tree(chart, true)
-        ) : (
-          <Empty icon="users" title={t.work.emptyTeam}>
-            <button className="btn primary" onClick={() => add(undefined)}>
-              <Icon name="plus" size={14} /> {t.team.addCeo}
+      <aside className="org-palette" aria-label={t.org.palette}>
+        <h4>{t.org.palette}</h4>
+        <p className="faint small">{t.org.paletteHint}</p>
+        <div className="org-roles">
+          {palette.map((r) => (
+            <button
+              key={r.title}
+              type="button"
+              className="org-role"
+              draggable
+              title={t.org.hireRole(r.title)}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'copy'
+                // A private type: dropping a role on a text field elsewhere inserts nothing.
+                e.dataTransfer.setData(ROLE_MIME, r.title)
+                setHiring(true)
+              }}
+              onDragEnd={() => {
+                setHiring(false)
+                setOver(null)
+              }}
+              onClick={() => hire(r, headFor(agents, r.department))}
+            >
+              <span className="ellipsis">{r.title}</span>
+              {r.department && <small className="ellipsis">{r.department}</small>}
             </button>
-          </Empty>
-        )}
+          ))}
+        </div>
+      </aside>
+
+      <div className="org-main">
+        <div className="org-meta">
+          {link ? t.org.linkHint : hiring ? t.org.dropHint : <>{t.team.summary(agents.length, depts)}<span className="org-hint"> · {t.org.canvasHint}</span></>}
+        </div>
+        <div className="org-tools" role="toolbar" aria-label={t.org.view}>
+          <button className="btn quiet icon sm" onClick={() => setZoom((z) => clampZoom(z - ZOOM.step))} disabled={zoom <= ZOOM.min} title={t.org.zoomOut} aria-label={t.org.zoomOut}>
+            <Icon name="minus" size={14} />
+          </button>
+          <button className="btn quiet sm num" onClick={() => setZoom(1)} title={t.org.zoomReset}>{Math.round(zoom * 100)}%</button>
+          <button className="btn quiet icon sm" onClick={() => setZoom((z) => clampZoom(z + ZOOM.step))} disabled={zoom >= ZOOM.max} title={t.org.zoomIn} aria-label={t.org.zoomIn}>
+            <Icon name="plus" size={14} />
+          </button>
+          <button className="btn quiet icon sm" onClick={fit} title={t.org.fit} aria-label={t.org.fit}>
+            <Icon name="fit" size={14} />
+          </button>
+          {arranged && (
+            <button className="btn quiet sm" onClick={() => setAgents((all) => all.map(({ pos, ...a }) => a))} title={t.org.tidyHint}>
+              {t.org.tidy}
+            </button>
+          )}
+        </div>
+        <div
+          className={`org-canvas ${link ? 'linking' : ''}`}
+          ref={canvas}
+          onPointerDown={startPan}
+          onDragOver={roleOver}
+          onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setOver(null)}
+          onDrop={roleDrop}
+        >
+          <div className="org-plane" ref={plane} style={{ width: size.w * zoom, height: size.h * zoom }}>
+            <div className="org-world" style={{ width: size.w, height: size.h, transform: `scale(${zoom})` }}>
+              <svg className="org-edges" width={size.w} height={size.h} aria-hidden>
+                <g transform={`translate(${PAD} ${PAD})`}>
+                  {agents.map((a) => {
+                    const boss = a.reportsTo ? byId.get(a.reportsTo) : undefined
+                    return boss ? <path key={a.id} d={edgePath(at(boss), at(a))} className={sel === a.id || sel === boss.id ? 'on' : undefined} /> : null
+                  })}
+                  {link && byId.get(link.from) && <path className="temp" d={edgePath(at(byId.get(link.from)!), { x: link.to.x - CARD.w / 2, y: link.to.y })} />}
+                </g>
+              </svg>
+              {agents.map((a) => {
+                const p = at(a)
+                const st = status.get(a.id)
+                return (
+                  <div key={a.id} className="org-card" style={{ left: p.x + PAD, top: p.y + PAD }} data-member={a.id}>
+                    <button
+                      className={`node ${a.exec ? 'exec' : ''} ${sel === a.id ? 'on' : ''} ${over === a.id ? 'drop' : ''}`}
+                      onPointerDown={(e) => startMove(e, a)}
+                      onClick={() => {
+                        if (moved.current) moved.current = false
+                        else setSel(a.id)
+                      }}
+                    >
+                      <div className="row">
+                        <Avatar name={a.name} seed={a.id} size={32} status={st} />
+                        <div className="ellipsis">
+                          <div className="node-name ellipsis">{a.name}</div>
+                          <div className="node-title ellipsis">{a.title}</div>
+                        </div>
+                        {a.exec === 'ceo' && <Icon name="crown" size={13} className="faint" />}
+                      </div>
+                      <div className="node-foot">
+                        <span className="ellipsis">{a.department || '—'}</span>
+                        <span className="ellipsis mono">{a.model || '—'}</span>
+                      </div>
+                      {st && st !== 'idle' && <span className="org-sr">{t.work.status[st]}</span>}
+                    </button>
+                    {/* Pointer only: the manager field in the member's sheet does the same from the keyboard. */}
+                    <button className="org-port" tabIndex={-1} aria-hidden onPointerDown={(e) => startLink(e, a)} title={t.org.linkFrom(a.name)} />
+                    <button className="node-add" onClick={() => hire(starterRole(agents, a), a)} title={t.team.addReport(a.name)} aria-label={t.team.addReport(a.name)}>
+                      <Icon name="plus" size={13} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
       </div>
 
       {dirty && (
