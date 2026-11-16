@@ -4,14 +4,13 @@
  */
 const en = {
   // Team chart
-  canvasHint: 'Drag cards to arrange them. Drag from the dot under a card onto someone to make them that person’s report.',
   linkHint: 'Drop on the person who will report here',
   dropHint: 'Drop on a manager, or on empty space to go to the department’s executive',
   linkFrom: (name: string) => `Drag onto someone to make them report to ${name}`,
   cantLink: (name: string, boss: string) => `${name} can’t report to ${boss}: executives keep their place, and nobody can report to someone below them.`,
   moved: (name: string, boss: string) => `${name} now reports to ${boss}`,
   palette: 'Add people',
-  paletteHint: 'Drag a role onto the canvas or onto a manager, or click it.',
+  paletteHint: 'Drag a role onto the canvas or onto a manager, or click it. To change who someone reports to, drag from the dot under their new manager onto them.',
   hireRole: (role: string) => `Add a ${role}`,
   view: 'View',
   zoomIn: 'Zoom in',
@@ -81,14 +80,13 @@ const en = {
 }
 
 const uz: typeof en = {
-  canvasHint: 'Kartalarni tortib joylashtiring. Kartaning ostidagi nuqtadan boshqa xodimga torting — u shu kartaga bo‘ysunadi.',
   linkHint: 'Bu yerga bo‘ysunadigan xodim ustiga qo‘yib yuboring',
   dropHint: 'Boshliq ustiga yoki bo‘lim rahbariga berish uchun bo‘sh joyga qo‘yib yuboring',
   linkFrom: (name: string) => `${name}ga bo‘ysundirish uchun xodim ustiga torting`,
   cantLink: (name: string, boss: string) => `${name} ${boss}ga bo‘ysuna olmaydi: rahbarlar o‘rnida qoladi, hech kim o‘zidan pastdagiga bo‘ysunmaydi.`,
   moved: (name: string, boss: string) => `${name} endi ${boss}ga hisobot beradi`,
   palette: 'Xodim qo‘shish',
-  paletteHint: 'Rolni canvas’ga yoki boshliq ustiga torting yoki bosing.',
+  paletteHint: 'Rolni canvas’ga yoki boshliq ustiga torting yoki bosing. Boshliqni almashtirish uchun yangi boshliq ostidagi nuqtadan xodim ustiga torting.',
   hireRole: (role: string) => `${role} qo‘shish`,
   view: 'Ko‘rinish',
   zoomIn: 'Kattalashtirish',

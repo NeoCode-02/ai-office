@@ -125,6 +125,12 @@ p { margin: 0; text-wrap: pretty; }
 .tab.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm), var(--highlight); }
 .content { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .content.fixed { overflow: hidden; }
+/* Views are stacked: the office stays mounted under Usage and app settings, and its tabs under each other. */
+.views { flex: 1; min-height: 0; position: relative; }
+.layer { position: absolute; inset: 0; }
+.pane { position: absolute; inset: 0; overflow: auto; }
+.layer[inert], .pane[inert] { visibility: hidden; }
+.tab .dot.unsaved { width: 6px; height: 6px; background: var(--accent); }
 
 .page { max-width: 760px; margin: 0 auto; padding: 40px 32px 72px; }
 .page.wide { max-width: 980px; }
@@ -239,12 +245,14 @@ details.more > summary { list-style: none; cursor: pointer; display: flex; align
 details.more > summary::-webkit-details-marker { display: none; }
 details.more > summary svg { transition: transform 0.2s var(--ease); }
 details.more[open] > summary svg { transform: rotate(90deg); }
-.toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: var(--z-toast); background: var(--text); color: var(--bg); padding: 9px 15px; border-radius: 10px; font-size: 13px; font-weight: 500; box-shadow: var(--shadow-lg); animation: rise 0.2s var(--ease); max-width: min(560px, 80vw); }
+.toast { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: var(--z-toast); background: var(--text); color: var(--bg); padding: 9px 15px; border-radius: 10px; font-size: 13px; font-weight: 500; box-shadow: var(--shadow-lg); animation: rise 0.2s var(--ease); max-width: min(560px, 80vw); }
 .savebar { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: var(--z-panel); display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow-lg); animation: rise 0.2s var(--ease); font-size: 13px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
-.toast, .savebar { animation-name: rise-x; }
+.savebar { animation-name: rise-x; }
+.toast { animation-name: drop-x; }
 @keyframes rise-x { from { opacity: 0; transform: translate(-50%, 8px); } }
+@keyframes drop-x { from { opacity: 0; transform: translate(-50%, -8px); } }
 @keyframes slide { from { opacity: 0.4; transform: translateX(24px); } }
 
 /* ---------- welcome ---------- */

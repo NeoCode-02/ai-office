@@ -58,9 +58,11 @@ interface Props {
   onSave(p: Project): Promise<void>
   onDelete(): void | Promise<void>
   notify(t: string): void
+  /** Told whenever the form differs from the saved office. */
+  onDirty?(dirty: boolean): void
 }
 
-export default function Settings({ project, onSave, onDelete, notify }: Props) {
+export default function Settings({ project, onSave, onDelete, notify, onDirty }: Props) {
   const t = useT()
   // The saved office the form was loaded from (what "unsaved changes" compares against).
   const [loaded, setLoaded] = useState(project)
@@ -68,6 +70,7 @@ export default function Settings({ project, onSave, onDelete, notify }: Props) {
   const [busy, setBusy] = useState(false)
   const [exporting, setExporting] = useState(false)
   const dirty = isDirty(form, loaded)
+  useEffect(() => onDirty?.(dirty), [dirty, onDirty])
   const set = <K extends keyof OfficeForm>(k: K, v: OfficeForm[K]) => setForm((f) => ({ ...f, [k]: v }))
   const setSandbox = (patch: Partial<OfficeForm['sandbox']>) => setForm((f) => ({ ...f, sandbox: { ...f.sandbox, ...patch } }))
   const limitsId = useId()

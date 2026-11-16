@@ -49,7 +49,7 @@ Or download an installer from [Releases](https://github.com/NeoCode-02/ai-office
 Then:
 
 1. **Settings → AI providers** — add an API key. Supported out of the box: Anthropic (Claude), OpenAI, Google Gemini, DeepSeek, Kimi, GLM, OpenRouter, xAI, Mistral, Groq, Ollama, and any other OpenAI-compatible endpoint.
-2. **New office** — pick a workspace folder and a team template.
+2. **New office** — pick a workspace folder. The office starts with a CEO, CTO, CFO, COO and CMO; add everyone else on the **Team** canvas.
 3. **Work** — tell the CEO what you want. Approve commands when asked. Read the final report.
 
 ![Team view](docs/team.png)

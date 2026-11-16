@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Project, Provider } from '../../shared/types'
 import { errText, getLang, LANGS, useT } from './i18n'
 import { applyLive, createBatcher, officeState, type Live, type LiveItem } from './live'
@@ -65,6 +65,9 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [sel, setSel] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('work')
+  /** Tabs of the open office that were shown: they stay mounted, so drafts survive a look at another tab. */
+  const [opened, setOpened] = useState<{ id: string; tabs: Tab[] }>({ id: '', tabs: [] })
+  const [unsaved, setUnsaved] = useState<Partial<Record<Tab, boolean>>>({})
   const [prefs, setPrefs] = useState<PrefsTab | null>(null)
   const [usage, setUsage] = useState(false)
   const [live, setLive] = useState<Record<string, Live>>({})
@@ -159,6 +162,16 @@ export default function App() {
   )
 
   const project = projects.find((p) => p.id === sel)
+  if (project && (opened.id !== project.id || !opened.tabs.includes(tab))) {
+    setOpened({ id: project.id, tabs: opened.id === project.id ? [...opened.tabs, tab] : [tab] })
+    if (opened.id !== project.id) setUnsaved({})
+  }
+  const shown = project && opened.id === project.id ? opened.tabs : []
+  const dirtyOf = useCallback((which: Tab) => (dirty: boolean) => setUnsaved((u) => (!!u[which] === dirty ? u : { ...u, [which]: dirty })), [])
+  const teamDirty = useMemo(() => dirtyOf('team'), [dirtyOf])
+  const settingsDirty = useMemo(() => dirtyOf('settings'), [dirtyOf])
+  /** Usage or app settings cover the office; it stays mounted underneath. */
+  const over = usage || prefs !== null
 
   const saveProject = async (p: Project) => {
     await window.office.saveProject(p)
@@ -197,7 +210,7 @@ export default function App() {
     ['settings', t.nav.officeSettings, 'sliders']
   ]
 
-  let view: { title?: string; head?: ReactNode; className: string; panel?: boolean; body: ReactNode }
+  let view: { title?: string; head?: ReactNode; className: string; body: ReactNode }
   if (usage) {
     view = {
       title: t.nav.usage,
@@ -222,8 +235,7 @@ export default function App() {
   } else if (project) {
     view = {
       title: project.name,
-      className: tab === 'settings' ? '' : 'fixed',
-      panel: true,
+      className: '',
       head: (
         <div
           className="tabs"
@@ -250,17 +262,12 @@ export default function App() {
             >
               <Icon name={icon} size={14} />
               {label}
+              {unsaved[id] && <span className="dot unsaved" role="img" aria-label={t.common.unsaved} title={t.common.unsaved} />}
             </button>
           ))}
         </div>
       ),
-      body: (
-        <>
-          {tab === 'work' && <Work key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} onSave={saveProject} />}
-          {tab === 'team' && <Team key={project.id} project={project} providers={providers} live={live[project.id]} onSave={saveProject} notify={notify} />}
-          {tab === 'settings' && <Settings key={project.id} project={project} onSave={saveProject} notify={notify} onDelete={() => deleteProject(project.id)} />}
-        </>
-      )
+      body: null
     }
   } else {
     view = {
@@ -359,11 +366,27 @@ export default function App() {
             </button>
           </div>
         )}
-        <div
-          className={`content ${view.className}`}
-          {...(view.panel ? { id: 'office-panel', role: 'tabpanel', 'aria-labelledby': tabId(tab) } : {})}
-        >
-          {view.body}
+        <div className="views">
+          {project && (
+            <div className="content fixed layer" id="office-panel" role="tabpanel" aria-labelledby={tabId(tab)} inert={over}>
+              {shown.includes('work') && (
+                <div className="pane" inert={tab !== 'work'}>
+                  <Work key={project.id} project={project} providers={providers} live={live[project.id]} notify={notify} goTeam={() => setTab('team')} onSave={saveProject} />
+                </div>
+              )}
+              {shown.includes('team') && (
+                <div className="pane" inert={tab !== 'team'}>
+                  <Team key={project.id} project={project} providers={providers} live={live[project.id]} onSave={saveProject} notify={notify} onDirty={teamDirty} />
+                </div>
+              )}
+              {shown.includes('settings') && (
+                <div className="pane" inert={tab !== 'settings'}>
+                  <Settings key={project.id} project={project} onSave={saveProject} notify={notify} onDirty={settingsDirty} onDelete={() => deleteProject(project.id)} />
+                </div>
+              )}
+            </div>
+          )}
+          {(over || !project) && <div className={`content layer ${view.className}`}>{view.body}</div>}
         </div>
       </main>
 

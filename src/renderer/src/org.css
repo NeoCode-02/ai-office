@@ -3,7 +3,6 @@
 /* ---------- team canvas: live status, drop targets ---------- */
 .org-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .org-meta { right: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.org-hint { color: var(--text-3); }
 .node.drop { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 6%, var(--surface)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
 .node.drop * { pointer-events: none; }
 /* Keep Save reachable while a member's sheet is open: centre the bar between the palette and the sheet. */

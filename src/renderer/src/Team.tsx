@@ -114,6 +114,23 @@ const PAD = 40
 const ZOOM = { min: 0.4, max: 1.5, step: 0.1 }
 const clampZoom = (z: number) => Math.round(Math.min(ZOOM.max, Math.max(ZOOM.min, z)) * 10) / 10
 
+/** Width of the rail and the role palette beside the canvas (styles.css). */
+const CHROME = 232 + 196
+
+/** The canvas area the cards need, with the room around them. */
+function sizeOf(agents: Agent[], auto: Map<string, Point>) {
+  let w = 0
+  let h = 0
+  for (const a of agents) {
+    const p = a.pos ?? auto.get(a.id)
+    if (p) {
+      w = Math.max(w, p.x + CARD.w)
+      h = Math.max(h, p.y + CARD.h)
+    }
+  }
+  return { w: w + PAD * 2, h: h + PAD * 2 }
+}
+
 /** The member card under a screen point, if any. */
 const memberAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest('[data-member]')?.getAttribute('data-member') ?? null
 
@@ -138,9 +155,11 @@ interface Props {
   live?: Live
   onSave(p: Project): Promise<void>
   notify(t: string): void
+  /** Told whenever the team differs from the saved one. */
+  onDirty?(dirty: boolean): void
 }
 
-export default function Team({ project, providers, live, onSave, notify }: Props) {
+export default function Team({ project, providers, live, onSave, notify, onDirty }: Props) {
   const t = useT()
   const [agents, setAgents] = useState(project.agents)
   const [sel, setSel] = useState<string | null>(null)
@@ -148,30 +167,21 @@ export default function Team({ project, providers, live, onSave, notify }: Props
   const [mcp, setMcp] = useState<McpServer[]>([])
   const [pluginRoles, setPluginRoles] = useState<RoleTemplate[]>([])
   const [skills, setSkills] = useState<{ list: Skill[]; error?: unknown } | null>(null)
-  const [zoom, setZoom] = useState(1)
+  // Open with the whole width of the chart in view (down to 60%).
+  const [zoom, setZoom] = useState(() => clampZoom(Math.max(0.6, Math.min(1, Math.floor(((window.innerWidth - CHROME) / sizeOf(project.agents, autoLayout(project.agents)).w) * 10) / 10))))
   /** A line being drawn from a manager's port; `to` is the pointer in canvas units. */
   const [link, setLink] = useState<{ from: string; to: Point } | null>(null)
   /** The card a line or a role from the palette would land on. */
   const [over, setOver] = useState<string | null>(null)
   const [hiring, setHiring] = useState(false)
   const dirty = !sameJson(agents, project.agents)
+  useEffect(() => onDirty?.(dirty), [dirty, onDirty])
   const agent = agents.find((a) => a.id === sel)
   const status = useMemo(() => liveStatus(live?.events), [live?.events])
   const auto = useMemo(() => autoLayout(agents), [agents])
   const byId = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents])
   const at = (a: Agent): Point => a.pos ?? auto.get(a.id) ?? { x: 0, y: 0 }
-  const size = useMemo(() => {
-    let w = 0
-    let h = 0
-    for (const a of agents) {
-      const p = a.pos ?? auto.get(a.id)
-      if (p) {
-        w = Math.max(w, p.x + CARD.w)
-        h = Math.max(h, p.y + CARD.h)
-      }
-    }
-    return { w: w + PAD * 2, h: h + PAD * 2 }
-  }, [agents, auto])
+  const size = useMemo(() => sizeOf(agents, auto), [agents, auto])
 
   const canvas = useRef<HTMLDivElement>(null)
   const plane = useRef<HTMLDivElement>(null)
@@ -401,7 +411,7 @@ export default function Team({ project, providers, live, onSave, notify }: Props
 
       <div className="org-main">
         <div className="org-meta">
-          {link ? t.org.linkHint : hiring ? t.org.dropHint : <>{t.team.summary(agents.length, depts)}<span className="org-hint"> · {t.org.canvasHint}</span></>}
+          {link ? t.org.linkHint : hiring ? t.org.dropHint : t.team.summary(agents.length, depts)}
         </div>
         <div className="org-tools" role="toolbar" aria-label={t.org.view}>
           <button className="btn quiet icon sm" onClick={() => setZoom((z) => clampZoom(z - ZOOM.step))} disabled={zoom <= ZOOM.min} title={t.org.zoomOut} aria-label={t.org.zoomOut}>

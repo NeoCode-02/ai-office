@@ -39,7 +39,7 @@ npm run dev
 Yoki [Releases](https://github.com/NeoCode-02/ai-office/releases) sahifasidan o‘rnatuvchini yuklab oling. Hozircha imzolanmagan, shuning uchun birinchi ochishda Windows/macOS "noma’lum nashriyotchi" ogohlantirishini ko‘rsatadi.
 
 1. **Sozlamalar → AI provayderlar** — API kalit qo‘shing: Anthropic (Claude), OpenAI, Google Gemini, DeepSeek, Kimi, GLM, OpenRouter, xAI, Mistral, Groq, Ollama yoki istalgan OpenAI-compatible manzil.
-2. **Yangi ofis** — ish papkasi va jamoa shablonini tanlang.
+2. **Yangi ofis** — ish papkasini tanlang. Ofis CEO, CTO, CFO, COO va CMO bilan boshlanadi; qolganlarni **Jamoa** canvas’ida qo‘shasiz.
 3. **Ish** — bosh rahbarga nima kerakligini yozing. So‘ralganda buyruqlarga ruxsat bering. Yakuniy hisobotni o‘qing.
 
 ## Xarajat va limitlar

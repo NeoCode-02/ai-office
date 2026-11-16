@@ -197,6 +197,18 @@ try {
     for (let i = 1; i <= 5; i++) await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x: from.x + ((to.x - from.x) * i) / 5, y: from.y + ((to.y - from.y) * i) / 5 })
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...to })
     await until('the new reporting line', hasText, 'now reports to Lena')
+    // Unsaved edits survive a look at another tab, and the tab says so.
+    const openTab = (name) => {
+      const t = [...document.querySelectorAll('[role=tab]')].find((x) => x.textContent.trim() === name)
+      t?.click()
+      return t?.getAttribute('aria-selected') === 'true'
+    }
+    await until('the Work tab', openTab, 'Work')
+    await until('the unsaved mark on Team', () => document.querySelector('#office-tab-team .dot.unsaved') !== null)
+    await until('the Team tab', openTab, 'Team')
+    await until('the hired member still there', () => document.querySelectorAll('.org-card').length === 6)
+    await until('Save', clickText, 'Save')
+    await until('the team saved', () => document.querySelector('#office-tab-team .dot.unsaved') === null)
     await until('the Work tab', () => {
       const tab = [...document.querySelectorAll('[role=tab]')].find((x) => x.textContent.trim() === 'Work')
       tab?.click()

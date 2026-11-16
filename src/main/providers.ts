@@ -315,5 +315,5 @@ export const PRESETS: Preset[] = [
   { name: 'xAI (Grok)', kind: 'openai', baseURL: 'https://api.x.ai/v1', keyUrl: 'https://console.x.ai' },
   { name: 'Mistral', kind: 'openai', baseURL: 'https://api.mistral.ai/v1', keyUrl: 'https://console.mistral.ai/api-keys' },
   { name: 'Groq', kind: 'openai', baseURL: 'https://api.groq.com/openai/v1', keyUrl: 'https://console.groq.com/keys' },
-  { name: 'Ollama (lokal)', kind: 'openai', baseURL: 'http://localhost:11434/v1', keyUrl: '' }
+  { name: 'Ollama (local)', kind: 'openai', baseURL: 'http://localhost:11434/v1', keyUrl: '' }
 ]
