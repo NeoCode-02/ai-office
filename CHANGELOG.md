@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+### Team
+- No more team templates. Every office has a CEO, and a CTO, CFO, COO and CMO reporting to the CEO; they can't be removed, and their role and place are fixed. Older and imported offices get the missing executives once.
+- The Team page is a free canvas: place cards anywhere, drag from the dot under a card onto someone to make them a report, and add people from a role list grouped by department (dropped on empty space, they go to their department's executive). Zoom around the pointer, fit to view, tidy up.
+
+### Work
+- `web_fetch` asks before opening any new host in "ask" mode: the address itself can carry workspace data out.
+- Long command output keeps its start and its end, where builds and tests print what failed.
+- When work dies out without a word to the owner, the CEO is reminded once to report or carry on.
+- An MCP server that crashed is started again on the next call.
+
+### Interface
+- Unsaved edits on the Team and Settings tabs survive a look at another tab, which shows a dot meanwhile.
+- Messages appear at the top instead of covering the composer; the briefing field grows with its text; no empty spend chart.
+
+### Fixes
+- Release builds run lint and type checks first. Dependencies updated (`npm audit fix`).
+
 ## 0.3.0
 
 ### Costs and limits
