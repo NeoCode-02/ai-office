@@ -184,9 +184,12 @@ try {
     })
     await until('six cards and five lines', () => document.querySelectorAll('.org-card').length === 6 && document.querySelectorAll('.org-edges path').length === 5)
     const centre = (r) => ({ x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) })
+    await until('the sheet closed', () => {
+      document.querySelector('.sheet button[aria-label="Close"]')?.click()
+      return document.querySelector('.sheet') === null
+    })
     const rects = await inPage(() => {
       const card = (title) => [...document.querySelectorAll('.org-card')].find((c) => c.querySelector('.node-title')?.textContent.trim() === title)
-      document.querySelector('.sheet button[aria-label="Close"]')?.click()
       const box = (el) => el.getBoundingClientRect().toJSON()
       return { port: box(card('CFO').querySelector('.org-port')), qa: box(card('QA Engineer').querySelector('.node')) }
     })
