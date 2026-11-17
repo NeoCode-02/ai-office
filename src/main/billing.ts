@@ -17,6 +17,14 @@ export function cost(price: Price, kind: ProviderKind, u: Usage): number {
 export const totalTokens = (u: Usage) => u.in + u.cacheRead + u.cacheWrite + u.out
 
 /**
+ * What the budget and the spending caps count for a request without a price, so they still stop it:
+ * a mid-range model's list price, USD 3 in / 15 out per 1M tokens, cached input at the full input price.
+ * It is never shown as spend; adding the model's price replaces it.
+ */
+export const ESTIMATE: Price = { in: 3, out: 15 }
+export const estimate = (u: Usage) => cost(ESTIMATE, 'openai', u)
+
+/**
  * Anthropic list prices, USD / 1M tokens (platform docs as cached on 2026-10-06; list updated 2026-10-13).
  * Cache reads are 0.1× input unless set here, cache writes 1.25× input.
  */

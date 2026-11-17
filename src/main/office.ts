@@ -14,6 +14,7 @@ import {
   type ToolName,
   type Usage
 } from '../shared/types'
+import { estimate } from './billing'
 import { classify, type Classified } from './errors'
 import type { McpToolbox } from './mcp'
 import { openChat, type Chat, type Conn, type ToolCall, type ToolResult } from './providers'
@@ -773,9 +774,10 @@ export class Office {
     const { providerId, model: asked } = this.current(m)
     const model = served ?? asked
     const usd = this.deps.charge(providerId, model, usage)
-    this.spent += usd ?? 0
+    const est = usd === null ? estimate(usage) : undefined
+    this.spent += usd ?? est!
     this.requestCount++
-    this.emit({ type: 'cost', agentId: a.id, providerId, model, usd, usage, at: Date.now() })
+    this.emit({ type: 'cost', agentId: a.id, providerId, model, usd, ...(est !== undefined ? { est } : {}), usage, at: Date.now() })
     const max = this.limits.maxRequests
     if (this.project.budgetUsd > 0 && this.spent >= this.project.budgetUsd) this.stop('budget', { usd: this.spent })
     else if (max > 0 && this.requestCount - this.capBase >= max) this.stop('limit', { requests: this.requestCount - this.capBase })

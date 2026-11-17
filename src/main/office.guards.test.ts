@@ -122,6 +122,22 @@ describe('request cap and budget', () => {
     expect(lastRun(events)).toMatchObject({ state: 'stopped', reason: 'limit', requests: 3 })
   })
 
+  it('counts a request without a price at the estimate, so the budget still stops the work', async () => {
+    let n = 0
+    const { office, events } = setup([agent('ceo', null)], {
+      ceo: () => {
+        n++
+        return { calls: [call('read_file', { path: 'nope' })] }
+      }
+    }, { budgetUsd: 0.03 }, { charge: () => null })
+    office.start('loop')
+    await until(() => !office.isRunning)
+    // 1000 in + 1000 out at $3 / $15 per 1M = $0.018 a request: the second one passes $0.03.
+    expect(n).toBe(2)
+    expect(of(events, 'cost').map((e) => [e.usd, e.est])).toEqual([[null, 0.018], [null, 0.018]])
+    expect(lastRun(events)).toMatchObject({ state: 'stopped', reason: 'budget' })
+  })
+
   it('refuses new work once the budget is spent; raising it with configure() continues the run', async () => {
     const { office, events, project } = setup([agent('ceo', null)], {
       ceo: (input) => (input?.includes('more') ? report('finished') : { calls: [call('read_file', { path: 'nope' })] })

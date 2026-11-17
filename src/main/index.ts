@@ -169,7 +169,7 @@ function emit(projectId: string, runId: string, ev: OfficeEvent) {
     const agent = p?.agents.find((a) => a.id === ev.agentId)?.name ?? ev.agentId
     store.appendUsage({ ...ev.usage, at: ev.at, projectId, runId, agentId: ev.agentId, agent, providerId: ev.providerId, model: ev.model, usd: ev.usd })
     const before = caps.reached(settings)
-    caps.add(ev.usd ?? 0, ev.at)
+    caps.add(ev.usd ?? ev.est ?? 0, ev.at)
     const which = caps.reached(settings)
     // Stopping from inside the office's own emit would re-enter it; do it right after.
     if (which && !before) queueMicrotask(() => stopAll('cap', capSpent(which)))

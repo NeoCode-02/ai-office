@@ -107,6 +107,13 @@ describe('buildItems', () => {
 })
 
 describe('summarize', () => {
+  it('adds the estimate of a request without a price, and still counts it as unpriced', () => {
+    const s = summarize([run('running'), { type: 'cost', agentId: 'a', usd: null, est: 0.25, at: 3 }, { type: 'cost', agentId: 'a', usd: 0.5, at: 4 }])
+    expect(s.total).toBeCloseTo(0.75)
+    expect(s.cost.get('a')).toBeCloseTo(0.75)
+    expect(s.unpriced).toBe(1)
+  })
+
   it('adds up cost and tokens, including runs saved before v0.3', () => {
     const s = summarize([
       run('running'),

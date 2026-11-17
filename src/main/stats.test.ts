@@ -75,6 +75,10 @@ describe('spending caps', () => {
     const c = capUse([rec({ at: now, usd: 'x' as unknown as number }), rec({ at: now, usd: 1 })], { dailyCapUsd: 0, monthlyCapUsd: 0 }, now)
     expect(c).toEqual({ day: 1, month: 1, dailyCapUsd: 0, monthlyCapUsd: 0 })
   })
+  it('counts a request without a price at the estimate the budget used', () => {
+    const c = capUse([rec({ at: now, usd: null, in: 1_000_000, cacheRead: 0, cacheWrite: 0, out: 100_000 }), rec({ at: now, usd: 1 })], { dailyCapUsd: 0, monthlyCapUsd: 0 }, now)
+    expect(c.day).toBeCloseTo(1 + 3 + 1.5)
+  })
   it('is zero without usage', () => {
     expect(capUse([], DEFAULT_SETTINGS, now)).toEqual({ day: 0, month: 0, dailyCapUsd: 0, monthlyCapUsd: 0 })
   })

@@ -11,8 +11,8 @@ export function BudgetPill({ total, toks, unpriced, budget }: { total: number; t
   const title = [`${tokens(toks)} ${t.work.tokens}`, unpriced ? t.work.unpriced(unpriced) : '', meter ? t.run.budgetUsed(used) : ''].filter(Boolean).join(' · ')
   return (
     <span className={`pill ${meter ? `metered ${meter.level}` : ''}`} title={title}>
+      {unpriced > 0 && '~'}
       {usd(total)}
-      {unpriced > 0 && '+'}
       {budget > 0 && <span className="faint">{t.work.budget(budget)}</span>}
       {meter && (
         <span className="pill-meter" role="meter" aria-label={t.run.budgetUsed(used)} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(meter.pct)}>

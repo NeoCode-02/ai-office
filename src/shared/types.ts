@@ -200,8 +200,11 @@ export type OfficeEvent =
   /** detail: the start of the tool's result; diff: unified diff of a write_file / edit_file. */
   | { type: 'tool'; id: string; at: number; agentId: string; name: string; summary: string; ok: boolean; detail?: string; diff?: string }
   | { type: 'status'; agentId: string; status: AgentStatus; at: number }
-  /** usd is null when the price is unknown. Runs saved before v0.3 have inTok/outTok instead of usage. */
-  | { type: 'cost'; agentId: string; providerId?: string; model?: string; usd: number | null; usage?: Usage; inTok?: number; outTok?: number; at: number }
+  /**
+   * usd is null when the price is unknown; est is then what the budget and caps counted instead
+   * (billing.ts ESTIMATE). Runs saved before v0.3 have inTok/outTok instead of usage.
+   */
+  | { type: 'cost'; agentId: string; providerId?: string; model?: string; usd: number | null; est?: number; usage?: Usage; inTok?: number; outTok?: number; at: number }
   /**
    * fetch = web_fetch to this computer or the local network. sandbox: the command runs in Docker.
    * files: workspace files the team changed since the last approved command (they may affect what it runs).

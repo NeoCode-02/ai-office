@@ -11,6 +11,7 @@
 - Long command output keeps its start and its end, where builds and tests print what failed.
 - When work dies out without a word to the owner, the CEO is reminded once to report or carry on.
 - An MCP server that crashed is started again on the next call.
+- The budget and spending caps now also stop models without a price: such requests count at an estimated $3 / $15 per million tokens until you add the real price. Spend views show them with a ~.
 
 ### Interface
 - Unsaved edits on the Team and Settings tabs survive a look at another tab, which shows a dot meanwhile.

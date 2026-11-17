@@ -1,4 +1,5 @@
 import type { AppSettings, Billing, CapUse, QuotaUse, UsageRecord, UsageRow, UsageStats } from '../shared/types'
+import { estimate } from './billing'
 
 const row = (): UsageRow => ({ requests: 0, in: 0, cacheRead: 0, cacheWrite: 0, out: 0, usd: 0, unpriced: 0 })
 
@@ -87,8 +88,9 @@ export function capUse(records: UsageRecord[], settings: Pick<AppSettings, 'dail
   let day = 0
   let month = 0
   for (const x of records) {
-    // The log is plain JSON; a damaged record must not turn the sum into NaN.
-    const usd = typeof x.usd === 'number' && Number.isFinite(x.usd) ? x.usd : 0
+    // A request without a price counts at the estimate, as it did while it ran. A damaged record must not turn the sum into NaN.
+    const est = x.usd === null ? estimate({ in: x.in, cacheRead: x.cacheRead, cacheWrite: x.cacheWrite, out: x.out }) : 0
+    const usd = typeof x.usd === 'number' && Number.isFinite(x.usd) ? x.usd : Number.isFinite(est) ? est : 0
     if (x.at >= monthFrom && x.at < monthTo) month += usd
     if (x.at >= dayFrom && x.at < dayTo) day += usd
   }

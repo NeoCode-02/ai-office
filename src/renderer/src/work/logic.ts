@@ -138,8 +138,10 @@ export function summarize(events: readonly OfficeEvent[]): Summary {
       if (s.status.get(e.agentId) !== e.status) s.since.set(e.agentId, e.at)
       s.status.set(e.agentId, e.status)
     } else if (e.type === 'cost') {
-      s.cost.set(e.agentId, (s.cost.get(e.agentId) ?? 0) + (e.usd ?? 0))
-      s.total += e.usd ?? 0
+      // Without a price, the estimate the budget counted, so the meter agrees with when the budget stops.
+      const usd = e.usd ?? e.est ?? 0
+      s.cost.set(e.agentId, (s.cost.get(e.agentId) ?? 0) + usd)
+      s.total += usd
       if (e.usd === null) s.unpriced++
       s.toks += e.usage ? e.usage.in + e.usage.cacheRead + e.usage.cacheWrite + e.usage.out : (e.inTok ?? 0) + (e.outTok ?? 0)
     } else if (e.type === 'run') s.lastRun = e
