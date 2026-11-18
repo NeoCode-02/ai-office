@@ -27,6 +27,8 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
   const t = useT()
   const projectId = project.id
   const [text, setText] = useState('')
+  /** Workspace paths of the files attached to the message being written. */
+  const [files, setFiles] = useState<string[]>([])
   const [focus, setFocus] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel>(null)
   const [fresh, setFresh] = useState(false)
@@ -125,8 +127,18 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
   const target = focus && focus !== ceo?.id ? byId.get(focus) : ceo
   const overBudget = project.budgetUsd > 0 && s.total >= project.budgetUsd
 
+  const attach = async (paths?: string[]) => {
+    try {
+      const added = await window.office.attach(projectId, paths)
+      setFiles((cur) => [...cur, ...added.filter((p) => !cur.includes(p))])
+    } catch (e) {
+      notify(errText(e, t))
+    }
+  }
+
   const send = async () => {
-    const msg = text.trim()
+    // The paths are for the team, so this line stays in English like the rest of their instructions.
+    const msg = [text.trim(), files.length ? `Attached files: ${files.join(', ')}` : ''].filter(Boolean).join('\n\n')
     if (!msg || busy) return
     const to = canContinue && target && target.id !== ceo?.id ? target.id : undefined
     setBusy(true)
@@ -140,6 +152,7 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
       }
       setRefused(null)
       setText('')
+      setFiles([])
       stick.current = true
     } catch (e) {
       if (canContinue && errCode(e) === 'E_BUDGET_SPENT') {
@@ -211,6 +224,9 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
       autoFocus={fresh}
       placeholder={canContinue ? t.work.placeholderTo(target?.name ?? '') : t.work.placeholderGoal}
       hint={project.approval === 'ask' ? t.work.approvalAsk : t.work.approvalAuto}
+      files={files}
+      onAttach={(paths) => void attach(paths)}
+      onRemoveFile={(p) => setFiles((cur) => cur.filter((x) => x !== p))}
     />
   )
 

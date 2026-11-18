@@ -5,6 +5,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { CHANNELS, type Api } from '../shared/api'
 import { SYSTEM, type AppSettings, type McpServer, type ModelRef, type OfficeEvent, type Price, type Project, type Provider } from '../shared/types'
+import { attach } from './attachments'
 import { balance } from './balance'
 import { charge, fetchCatalog, matchCatalog, priceOf } from './billing'
 import { createCheckpoints } from './checkpoints'
@@ -303,6 +304,17 @@ const handlers: Api = {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
     return r.canceled ? null : r.filePaths[0]
   },
+  attach: async (projectId: string, paths?: string[]) => {
+    const p = project(projectId)
+    if (!p.workspaceDir || !fs.statSync(p.workspaceDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error('E_NO_WORKSPACE')
+    let files = paths
+    if (!files) {
+      const r = await dialog.showOpenDialog(win!, { properties: ['openFile', 'multiSelections'] })
+      if (r.canceled) return []
+      files = r.filePaths
+    }
+    return attach(p.workspaceDir, files)
+  },
   openWorkspace: async (projectId: string) => {
     const err = await shell.openPath(project(projectId).workspaceDir)
     if (err) throw new Error(err)
@@ -446,6 +458,7 @@ const ARGS: Record<keyof Api, (a: unknown[]) => boolean> = {
   importProject: none,
   pickFolder: none,
   openWorkspace: (a) => isId(a[0]),
+  attach: (a) => isId(a[0]) && (a[1] === undefined || strArr(a[1], 50, 4096)),
   listSkills: none,
   setSkillEnabled: (a) => label(a[0]) && bool(a[1]),
   createSkill: (a) => label(a[0]) && str(a[1], 2000) && str(a[2]),

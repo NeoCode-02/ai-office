@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { CHANNELS, type Api } from '../shared/api'
 import type { OfficeEvent, UpdateInfo } from '../shared/types'
 
@@ -8,7 +8,7 @@ type Async<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...
 const names: Record<keyof Api, true> = {
   appInfo: true, presets: true, getSettings: true, saveSettings: true, checkUpdate: true,
   listProviders: true, saveProvider: true, deleteProvider: true, listModels: true, priceInfo: true, catalogPrices: true, usageStats: true, balance: true,
-  listProjects: true, saveProject: true, deleteProject: true, exportProject: true, importProject: true, pickFolder: true, openWorkspace: true,
+  listProjects: true, saveProject: true, deleteProject: true, exportProject: true, importProject: true, pickFolder: true, openWorkspace: true, attach: true,
   listSkills: true, setSkillEnabled: true, createSkill: true, importSkill: true, deleteSkill: true,
   listPlugins: true, importPlugin: true, setPluginEnabled: true, deletePlugin: true, pluginRoles: true,
   listMcp: true, saveMcp: true, deleteMcp: true, testMcp: true,
@@ -31,7 +31,9 @@ const bridge = {
   onEvent: (cb: (projectId: string, runId: string, ev: OfficeEvent) => void) => listen(CHANNELS.event, cb),
   onDelta: (cb: (projectId: string, agentId: string, text: string | null) => void) => listen(CHANNELS.delta, cb),
   onOpenProject: (cb: (projectId: string) => void) => listen(CHANNELS.openProject, cb),
-  onUpdate: (cb: (info: UpdateInfo) => void) => listen(CHANNELS.update, cb)
+  onUpdate: (cb: (info: UpdateInfo) => void) => listen(CHANNELS.update, cb),
+  /** Where a file dropped on the window lives on disk ('' for one that isn't a file on disk). */
+  pathOf: (file: File) => webUtils.getPathForFile(file)
 }
 export type Bridge = typeof bridge
 

@@ -4,7 +4,7 @@ import type { Sandbox, ToolName } from '../shared/types'
 import { unifiedDiff } from './diff'
 import { clip, exec } from './exec'
 import { webFetch } from './fetch'
-import type { ToolCall, ToolDef } from './providers'
+import type { Media, ToolCall, ToolDef } from './providers'
 import { searchFiles } from './search'
 
 export { clip } from './exec'
@@ -22,7 +22,7 @@ export const TOOL_DEFS: Record<ToolName, ToolDef> = {
   },
   read_file: {
     name: 'read_file',
-    description: 'Read a text file from the shared workspace (up to 5 MB; for bigger files use search_files on the file).',
+    description: 'Read a file from the shared workspace (up to 5 MB; for bigger text files use search_files on the file). Images (png, jpg, gif, webp) and PDFs are shown to you as they are, so you can look at them.',
     parameters: params({ path: str('File path relative to the workspace') }, ['path'])
   },
   search_files: {
@@ -106,12 +106,16 @@ export interface ToolCtx {
   approveFetch?(url: string): Promise<boolean>
 }
 
-/** diff: unified diff of a write_file / edit_file; changed: the file, workspace-relative with "/". */
+/**
+ * diff: unified diff of a write_file / edit_file; changed: the file, workspace-relative with "/";
+ * media: an image or PDF that read_file hands to the model itself.
+ */
 export interface ToolOutcome {
   content: string
   isError: boolean
   diff?: string
   changed?: string
+  media?: Media
 }
 
 const MAX_READ = 5 * 1024 * 1024
@@ -217,20 +221,35 @@ function openRegular(f: string, flags: number): number {
   throw new Error(st.isDirectory() ? 'This is a folder; use list_files' : 'This is not a regular file')
 }
 
-/** A regular file's text; binary files (NUL in the first 8 KB) are not decoded. */
-function readText(f: string): Text {
+/** A regular file's bytes, up to MAX_READ. */
+function readBytes(f: string): Buffer {
   const fd = openRegular(f, O_RDONLY)
   try {
     const size = fs.fstatSync(fd).size
     if (size > MAX_READ) {
       throw new Error(`The file is too large to read (${(size / 1024 / 1024).toFixed(1)} MB, limit 5 MB); use search_files on it to find the lines you need`)
     }
-    const buf = fs.readFileSync(fd)
-    if (buf.subarray(0, 8192).includes(0)) return { binary: true, size: buf.length }
-    return { text: buf.toString('utf8'), size: buf.length }
+    return fs.readFileSync(fd)
   } finally {
     fs.closeSync(fd)
   }
+}
+
+/** A regular file's text; binary files (NUL in the first 8 KB) are not decoded. */
+function readText(f: string): Text {
+  const buf = readBytes(f)
+  if (buf.subarray(0, 8192).includes(0)) return { binary: true, size: buf.length }
+  return { text: buf.toString('utf8'), size: buf.length }
+}
+
+/** Files read_file hands to the model itself rather than as text. */
+const MEDIA: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.pdf': 'application/pdf'
 }
 
 /** Writes a regular file; refuses FIFOs, devices and folders instead of blocking on them. */
@@ -310,8 +329,13 @@ export async function runTool(call: ToolCall, allowed: ToolName[], ctx: ToolCtx)
         const { base, target } = resolveIn(ctx.root, s('path'))
         return ok(listTree(target, base, true).join('\n') || '(empty)')
       }
-      case 'read_file':
-        return ok(shown(readText(inside(ctx.root, s('path')))))
+      case 'read_file': {
+        const f = inside(ctx.root, s('path'))
+        const mime = MEDIA[path.extname(f).toLowerCase()]
+        if (!mime) return ok(shown(readText(f)))
+        const data = readBytes(f)
+        return { ...ok(`${s('path')} (${mime}, ${data.length} bytes) is shown to you below.`), media: { mime, name: path.basename(f), data: data.toString('base64') } }
+      }
       case 'search_files': {
         const { base, target } = resolveIn(ctx.root, s('path'))
         return ok(await searchFiles(base, target, s('pattern'), { signal: ctx.signal }))

@@ -57,6 +57,11 @@ export interface Api {
   pickFolder(): Promise<string | null>
   /** Opens the office's workspace folder in the system file manager. */
   openWorkspace(projectId: string): Promise<void>
+  /**
+   * Copies files into the workspace's attachments/ folder and returns their workspace paths; without
+   * `paths` it asks with an open dialog ([] when cancelled). Throws E_NO_WORKSPACE, E_ATTACH_NOT_FILE|name, E_ATTACH_TOO_BIG|name.
+   */
+  attach(projectId: string, paths?: string[]): Promise<string[]>
 
   listSkills(): Skill[]
   setSkillEnabled(name: string, on: boolean): void

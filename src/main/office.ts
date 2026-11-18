@@ -628,7 +628,7 @@ export class Office {
             ...(r.diff ? { diff: clip(r.diff, DIFF_CHARS) } : {})
           })
         }
-        results.push({ id: call.id, content: r.content, isError: r.isError })
+        results.push({ id: call.id, content: r.content, isError: r.isError, ...(r.media ? { media: r.media } : {}) })
       }
       // Unanswered calls are sent with the next wake-up so the history stays valid.
       if (!this.running || step >= MAX_STEPS) {

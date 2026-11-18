@@ -213,6 +213,43 @@ const ok = completion({ content: 'Done' })
 const openai = (baseURL: string) => ({ kind: 'openai' as const, baseURL, apiKey: 'k' })
 const call = (id: string, args: string) => ({ id, type: 'function' as const, function: { name: 'read_file', arguments: args } })
 
+const png = { mime: 'image/png', name: 'shot.png', data: 'iVBORw0K' }
+const pdf = { mime: 'application/pdf', name: 'spec.pdf', data: 'JVBERi0x' }
+
+describe('files a tool opened', () => {
+  it('Anthropic gets images and PDFs inside the tool result', async () => {
+    const api = await fakeApi([hello])
+    await openChat(anthropic(api.url), 'm', 'sys', [tool]).step([{ id: 't1', content: 'shown', media: png }, { id: 't2', content: 'shown', media: pdf }, { id: 't3', content: 'text' }])
+    const [a, b, c] = api.seen[0].body.messages.at(-1).content
+    expect(a.content).toEqual([{ type: 'text', text: 'shown' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0K' } }])
+    expect(b.content[1]).toEqual({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0x' } })
+    expect(c.content).toBe('text')
+  })
+
+  it('OpenAI-compatible APIs get images in one user message after the tool messages, with the owner text', async () => {
+    const api = await fakeApi([ok])
+    await openChat(openai(`${api.url}/v1`), 'm', 'sys', [tool]).step([{ id: 't1', content: 'shown', media: png }, { id: 't2', content: 'plain' }], 'next')
+    const msgs = api.seen[0].body.messages
+    expect(msgs.slice(1, 3).map((m: any) => [m.role, m.content])).toEqual([['tool', 'shown'], ['tool', 'plain']])
+    expect(msgs[3]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'The files you opened:' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0K' } }, { type: 'text', text: 'next' }]
+    })
+  })
+
+  it('sends PDFs only where the API takes files, and tells the model otherwise', async () => {
+    const other = await fakeApi([ok])
+    await openChat(openai(`${other.url}/v1`), 'm', 'sys', [tool]).step([{ id: 't1', content: 'shown', media: pdf }])
+    expect(other.seen[0].body.messages.at(-1)).toMatchObject({ role: 'tool', content: expect.stringContaining('cannot show PDF') })
+
+    const api = await fakeApi([ok])
+    const realFetch = globalThis.fetch
+    vi.stubGlobal('fetch', (input: string | URL, init?: RequestInit) => realFetch(String(input).replace('https://api.openai.com', api.url), init))
+    await openChat(openai('https://api.openai.com/v1'), 'gpt-x', 'sys', [tool]).step([{ id: 't1', content: 'shown', media: pdf }])
+    expect(api.seen[0].body.messages.at(-1).content[1]).toEqual({ type: 'file', file: { filename: 'spec.pdf', file_data: 'data:application/pdf;base64,JVBERi0x' } })
+  })
+})
+
 describe('OpenAI-compatible adapter', () => {
   it('sends no reply limit unless the member has one, then max_tokens on other hosts', async () => {
     const api = await fakeApi([ok, ok])

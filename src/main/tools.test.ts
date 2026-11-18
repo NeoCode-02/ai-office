@@ -36,6 +36,19 @@ const ctx = (root: string, extra: Partial<ToolCtx> = {}): ToolCtx => ({
 const run = (root: string, name: string, input: Record<string, unknown>, extra: Partial<ToolCtx> = {}) =>
   runTool({ id: '1', name, input }, ALL, ctx(root, extra))
 
+describe('read_file on images and PDFs', () => {
+  it('hands the file itself to the model, and text files stay text', async () => {
+    const root = tmp('ws-')
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2])
+    fs.writeFileSync(path.join(root, 'Shot.PNG'), bytes)
+    fs.writeFileSync(path.join(root, 'a.txt'), 'hi')
+    const r = await run(root, 'read_file', { path: 'Shot.PNG' })
+    expect(r).toMatchObject({ isError: false, media: { mime: 'image/png', name: 'Shot.PNG', data: bytes.toString('base64') } })
+    expect(r.content).toMatch(/is shown to you below/)
+    expect(await run(root, 'read_file', { path: 'a.txt' })).toEqual({ content: 'hi', isError: false })
+  })
+})
+
 describe('inside', () => {
   it('keeps paths inside the root', () => {
     const root = tmp('ws-')

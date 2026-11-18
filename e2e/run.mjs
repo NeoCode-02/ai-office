@@ -219,6 +219,17 @@ try {
     })
   })
 
+  await step('attach a file', async () => {
+    const src = path.join(tmp, 'brief.txt')
+    fs.writeFileSync(src, 'The brief')
+    const got = await inPage(async (file) => {
+      const [p] = await window.office.listProjects()
+      return window.office.attach(p.id, [file])
+    }, src)
+    if (JSON.stringify(got) !== JSON.stringify(['attachments/brief.txt'])) throw new Error(`attach returned ${JSON.stringify(got)}`)
+    if (fs.readFileSync(path.join(ws, 'attachments', 'brief.txt'), 'utf8') !== 'The brief') throw new Error('the attachment was not copied')
+  })
+
   await step('give a goal and approve the command', async () => {
     await until('composer', say, 'Write hello.txt')
     await until('Send', clickText, 'Send')

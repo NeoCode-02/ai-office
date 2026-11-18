@@ -12,10 +12,17 @@ export interface ToolCall {
   name: string
   input: Record<string, unknown>
 }
+/** An image or PDF for the model to look at; data is base64. */
+export interface Media {
+  mime: string
+  name: string
+  data: string
+}
 export interface ToolResult {
   id: string
   content: string
   isError?: boolean
+  media?: Media
 }
 export interface Turn {
   text: string
@@ -101,7 +108,7 @@ function anthropicChat(conn: Conn, model: string, system: string, tools: ToolDef
       const content: Anthropic.Beta.BetaContentBlockParam[] = results.map((r) => ({
         type: 'tool_result',
         tool_use_id: r.id,
-        content: r.content,
+        content: r.media ? [{ type: 'text', text: r.content }, anthropicMedia(r.media)] : r.content,
         is_error: r.isError
       }))
       if (text) content.push({ type: 'text', text })
@@ -180,8 +187,16 @@ function openaiChat(conn: Conn, model: string, system: string, tools: ToolDef[],
       const prevOrphans = orphans
       results = [...orphans.map((id) => ({ id, content: CUT_OFF })), ...results]
       orphans = []
-      for (const r of results) messages.push({ role: 'tool', tool_call_id: r.id, content: r.content })
-      if (text) messages.push({ role: 'user', content: text })
+      // Tool messages carry text only: images (and PDFs where the API takes them) follow in one user message.
+      const parts: OpenAI.Chat.ChatCompletionContentPart[] = []
+      for (const r of results) {
+        const part = r.media && openaiMedia(r.media, conn.baseURL)
+        if (part) parts.push(part)
+        const note = r.media && !part ? `\n${NO_PDF}` : ''
+        messages.push({ role: 'tool', tool_call_id: r.id, content: r.content + note })
+      }
+      if (parts.length) messages.push({ role: 'user', content: [{ type: 'text', text: 'The files you opened:' }, ...parts, ...(text ? [{ type: 'text' as const, text }] : [])] })
+      else if (text) messages.push({ role: 'user', content: text })
 
       let res: OpenAI.Chat.ChatCompletion
       try {
@@ -246,6 +261,19 @@ function isOpenAI(baseURL: string): boolean {
 }
 
 const CUT_OFF = 'Not run: the previous reply was cut off'
+const NO_PDF = 'This provider cannot show PDF files to you. Ask a colleague on another model, or extract the text with a command.'
+
+function anthropicMedia(m: Media): Anthropic.Beta.BetaImageBlockParam | Anthropic.Beta.BetaRequestDocumentBlock {
+  if (m.mime === 'application/pdf') return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: m.data } }
+  return { type: 'image', source: { type: 'base64', media_type: m.mime as 'image/png', data: m.data } }
+}
+
+/** null for a PDF on an API that takes no files in chat (only OpenAI's own and OpenRouter do). */
+function openaiMedia(m: Media, baseURL: string): OpenAI.Chat.ChatCompletionContentPart | null {
+  const url = `data:${m.mime};base64,${m.data}`
+  if (m.mime !== 'application/pdf') return { type: 'image_url', image_url: { url } }
+  return isOpenAI(baseURL) || /openrouter\.ai/.test(baseURL) ? { type: 'file', file: { filename: m.name, file_data: url } } : null
+}
 
 /** A usable reply limit, or undefined for the adapter's default. */
 function tokenLimit(n: number | undefined): number | undefined {

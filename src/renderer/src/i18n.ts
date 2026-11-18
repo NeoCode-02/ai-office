@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import media from './i18n/media'
 import org from './i18n/org'
 import run from './i18n/run'
 import shell from './i18n/shell'
@@ -6,6 +7,7 @@ import shell from './i18n/shell'
 const en = {
   lang: 'English',
   run: run.en,
+  media: media.en,
   org: org.en,
   shell: shell.en,
   common: {
@@ -399,6 +401,8 @@ const en = {
     sources: { builtin: 'Built in', user: 'Yours', plugin: 'Plugin' } as Record<string, string>
   },
   errors: {
+    E_ATTACH_NOT_FILE: (n: string) => `${n} is not a file, so it can’t be attached.`,
+    E_ATTACH_TOO_BIG: (n: string) => `${n} is larger than 50 MB.`,
     E_NO_PROJECT: 'This office no longer exists.',
     E_NO_WORKSPACE: 'Workspace folder not found. Choose an existing folder in Settings.',
     E_NO_RUN: 'There is no active work. Start a new task.',
@@ -444,6 +448,7 @@ export type Dict = typeof en
 const uz: Dict = {
   lang: 'O‘zbekcha',
   run: run.uz,
+  media: media.uz,
   org: org.uz,
   shell: shell.uz,
   common: {
@@ -837,6 +842,8 @@ const uz: Dict = {
     sources: { builtin: 'Ichki', user: 'Sizniki', plugin: 'Plagin' }
   },
   errors: {
+    E_ATTACH_NOT_FILE: (n: string) => `${n} fayl emas, uni biriktirib bo‘lmaydi.`,
+    E_ATTACH_TOO_BIG: (n: string) => `${n} 50 MB dan katta.`,
     E_NO_PROJECT: 'Bu ofis endi mavjud emas.',
     E_NO_WORKSPACE: 'Ish papkasi topilmadi. Sozlamalarda mavjud papkani tanlang.',
     E_NO_RUN: 'Faol ish yo‘q. Yangi vazifa boshlang.',
