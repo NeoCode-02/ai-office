@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- **Attach files** to a message: the paperclip in the message box, or drop files on it. They are copied into the workspace's `attachments/` folder. When a member opens an image (png, jpg, gif, webp) or a PDF with `read_file`, the model sees the file itself (PDFs on Anthropic, OpenAI and OpenRouter).
+- **Speak a message**: hold the microphone button, let go to turn your words into text (Settings → General → Voice: an OpenAI or Groq key).
+- **Talk**: with Talk on, the CEO's replies to you are read aloud and what you say is sent right away. Replies are read with Windows voices (free, offline) or a provider voice (OpenAI text-to-speech).
+- The microphone is allowed only for the app's own window, and only audio; every other web permission is refused.
+
 ## 0.4.0
 
 ### Team
