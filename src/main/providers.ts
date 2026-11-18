@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 import type { Effort, Preset, ProviderKind, Usage } from '../shared/types'
 
 export interface ToolDef {
@@ -63,6 +63,13 @@ export function openChat(conn: Conn, model: string, system: string, tools: ToolD
   return conn.kind === 'anthropic'
     ? anthropicChat(conn, model, system, tools, opts)
     : openaiChat(conn, model, system, tools, opts)
+}
+
+/** Text of recorded speech (webm/opus from the app's recorder) through an OpenAI-compatible /audio/transcriptions. */
+export async function transcribe(conn: Conn, model: string, audio: Uint8Array): Promise<string> {
+  const client = new OpenAI({ apiKey: conn.apiKey, baseURL: conn.baseURL || undefined })
+  const r = await client.audio.transcriptions.create({ file: await toFile(audio, 'speech.webm', { type: 'audio/webm' }), model })
+  return r.text.trim()
 }
 
 /** Lists model ids for the "Model" picker; empty when the endpoint has no /models. */

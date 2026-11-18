@@ -32,6 +32,8 @@ export interface Api {
   saveSettings(s: AppSettings): void
   /** Latest GitHub release; throws E_UPDATE|status. */
   checkUpdate(): Promise<UpdateInfo>
+  /** Text of recorded speech, on the speech-to-text provider of the settings. Throws E_NO_STT. */
+  transcribe(audio: Uint8Array): Promise<string>
 
   listProviders(): Provider[]
   saveProvider(p: Omit<Provider, 'hasKey'>, key: string): void

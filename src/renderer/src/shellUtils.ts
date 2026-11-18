@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, type AppSettings, type UpdateInfo } from '../../shared/types'
+import { voiceFrom } from '../../shared/voice'
 
 /** `E_CODE` of an error thrown by the main process (`E_CODE` or `E_CODE|param`), else null. */
 export function errCode(e: unknown): string | null {
@@ -38,7 +39,8 @@ export function withDefaults(s: Partial<AppSettings> | null | undefined): AppSet
     dailyCapUsd: cap(v.dailyCapUsd, d.dailyCapUsd),
     monthlyCapUsd: cap(v.monthlyCapUsd, d.monthlyCapUsd),
     notifications: typeof v.notifications === 'boolean' ? v.notifications : d.notifications,
-    checkUpdates: typeof v.checkUpdates === 'boolean' ? v.checkUpdates : d.checkUpdates
+    checkUpdates: typeof v.checkUpdates === 'boolean' ? v.checkUpdates : d.checkUpdates,
+    voice: voiceFrom(v.voice)
   }
 }
 

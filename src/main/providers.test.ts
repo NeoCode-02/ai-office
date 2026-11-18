@@ -2,7 +2,8 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { classify } from './errors'
-import { openChat, type ToolDef } from './providers'
+import { openChat, transcribe, type ToolDef } from './providers'
+import { sttModelFor } from '../shared/voice'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- request bodies are checked as plain JSON */
 
@@ -215,6 +216,37 @@ const call = (id: string, args: string) => ({ id, type: 'function' as const, fun
 
 const png = { mime: 'image/png', name: 'shot.png', data: 'iVBORw0K' }
 const pdf = { mime: 'application/pdf', name: 'spec.pdf', data: 'JVBERi0x' }
+
+describe('speech to text', () => {
+  it('posts the recording to /audio/transcriptions with the model and returns the text', async () => {
+    let body = ''
+    let url = ''
+    const server = http.createServer((req, res) => {
+      url = req.url ?? ''
+      req.setEncoding('latin1')
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ text: ' salom jamoa ' }))
+      })
+    })
+    servers.push(server)
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`
+    expect(await transcribe(openai(base), 'whisper-large-v3-turbo', new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]))).toBe('salom jamoa')
+    expect(url).toBe('/v1/audio/transcriptions')
+    expect(body).toMatch(/name="model"\r\n\r\nwhisper-large-v3-turbo/)
+    expect(body).toMatch(/filename="speech\.webm"/)
+    expect(body).toContain('\x1a\x45\xdf\xa3')
+  })
+
+  it('picks a model the provider offers when none is set', () => {
+    expect(sttModelFor('https://api.groq.com/openai/v1')).toBe('whisper-large-v3-turbo')
+    expect(sttModelFor('https://api.openai.com/v1')).toBe('gpt-4o-mini-transcribe')
+    expect(sttModelFor('')).toBe('gpt-4o-mini-transcribe')
+    expect(sttModelFor('http://localhost:8000/v1')).toBe('whisper-1')
+  })
+})
 
 describe('files a tool opened', () => {
   it('Anthropic gets images and PDFs inside the tool result', async () => {

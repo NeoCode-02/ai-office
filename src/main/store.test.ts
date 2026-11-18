@@ -53,10 +53,14 @@ describe('settings', () => {
 
   it('saves, keeping the stored value for a field with a wrong type', () => {
     const store = createStore(tmp(), plain)
-    store.saveSettings({ theme: 'light', dailyCapUsd: 3, monthlyCapUsd: 0, notifications: false, checkUpdates: true })
-    expect(store.getSettings()).toEqual({ theme: 'light', dailyCapUsd: 3, monthlyCapUsd: 0, notifications: false, checkUpdates: true })
+    const voice = { ...DEFAULT_SETTINGS.voice, sttProvider: 'groq', tts: 'provider' as const }
+    store.saveSettings({ theme: 'light', dailyCapUsd: 3, monthlyCapUsd: 0, notifications: false, checkUpdates: true, voice })
+    expect(store.getSettings()).toEqual({ theme: 'light', dailyCapUsd: 3, monthlyCapUsd: 0, notifications: false, checkUpdates: true, voice })
     store.saveSettings({ ...store.getSettings(), theme: 'neon' as 'dark', dailyCapUsd: -1, monthlyCapUsd: NaN })
     expect(store.getSettings()).toMatchObject({ theme: 'light', dailyCapUsd: 3, monthlyCapUsd: 0 })
+    // Settings saved before voice existed get the defaults; a damaged field keeps what was saved.
+    store.saveSettings({ ...store.getSettings(), voice: { ...voice, tts: 'loud' as 'system', sttModel: 5 as unknown as string } })
+    expect(store.getSettings().voice).toEqual(voice)
   })
 })
 

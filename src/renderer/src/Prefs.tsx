@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
-import type { AppSettings, Provider, UpdateInfo } from '../../shared/types'
+import type { AppSettings, Provider, UpdateInfo, Voice } from '../../shared/types'
 import Extensions from './Extensions'
 import { errText, LANGS, setLang, useT, getLang, type Lang } from './i18n'
 import Providers from './Providers'
 import { httpsUrl, parseUsd, updateState, withDefaults } from './shellUtils'
 import { Field, Icon, Mark, Switch, type IconName } from './ui'
+import { sttModelFor } from '../../shared/voice'
 
 export type PrefsTab = 'providers' | 'extensions' | 'general'
 
@@ -154,6 +155,8 @@ function General({ notify }: { notify(t: string): void }) {
             <Caps settings={settings} onSave={(dailyCapUsd, monthlyCapUsd) => save({ dailyCapUsd, monthlyCapUsd })} />
           </section>
 
+          <VoiceSettings settings={settings} onSave={(voice) => save({ voice })} />
+
           <section className="section">
             <div className="list">
               {row(s.updates, s.updatesHint, <Switch on={settings.checkUpdates} label={s.updates} onChange={(on) => void save({ checkUpdates: on })} />)}
@@ -275,5 +278,58 @@ function UpdateCheck() {
         <Icon name="refresh" size={13} /> {state.busy ? s.checking : s.checkNow}
       </button>
     </div>
+  )
+}
+
+/** Speech to text (and, with Talk, the voice that reads replies). Providers with a key and an OpenAI-compatible API. */
+function VoiceSettings({ settings, onSave }: { settings: AppSettings; onSave(v: Voice): void }) {
+  const t = useT()
+  const m = t.media
+  const [providers, setProviders] = useState<Provider[]>([])
+  const sttId = useId()
+  const modelId = useId()
+  useEffect(() => {
+    void window.office.listProviders().then((list) => setProviders(list.filter((x) => x.kind === 'openai' && x.hasKey)), () => undefined)
+  }, [])
+  const v = settings.voice
+  const stt = providers.find((x) => x.id === v.sttProvider)
+  return (
+    <section className="section">
+      <div className="section-head">
+        <div>
+          <h3>{m.voice}</h3>
+          <p>{m.voiceHint}</p>
+        </div>
+      </div>
+      <div className="list">
+        <div className="list-row">
+          <div className="spacer">
+            <label htmlFor={sttId} style={{ fontWeight: 600 }}>{m.stt}</label>
+            <div className="muted small">{providers.length ? m.sttHint : m.sttNone}</div>
+          </div>
+          <select id={sttId} className="select org-image" value={stt ? v.sttProvider : ''} onChange={(e) => onSave({ ...v, sttProvider: e.target.value })}>
+            <option value="">{m.sttOff}</option>
+            {providers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </div>
+        {stt && (
+          <div className="list-row">
+            <div className="spacer">
+              <label htmlFor={modelId} style={{ fontWeight: 600 }}>{m.sttModel}</label>
+              <div className="muted small">{m.sttModelHint}</div>
+            </div>
+            <input
+              key={stt.id}
+              id={modelId}
+              className="input mono org-image"
+              defaultValue={v.sttModel}
+              placeholder={sttModelFor(stt.baseURL)}
+              onBlur={(e) => e.target.value.trim() !== v.sttModel && onSave({ ...v, sttModel: e.target.value.trim() })}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            />
+          </div>
+        )}
+      </div>
+    </section>
   )
 }

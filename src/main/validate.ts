@@ -1,4 +1,4 @@
-import { EXEC_KINDS, TOOL_NAMES, type Agent, type AppSettings, type Billing, type Effort, type Limits, type McpServer, type ModelRef, type Price, type Project, type Provider, type Sandbox } from '../shared/types'
+import { EXEC_KINDS, TOOL_NAMES, type Agent, type AppSettings, type Billing, type Effort, type Limits, type McpServer, type ModelRef, type Price, type Project, type Provider, type Sandbox, type Voice } from '../shared/types'
 
 /**
  * Shape checks for values that cross a trust boundary (IPC arguments, imported files).
@@ -105,7 +105,20 @@ export const isSettings = (v: unknown): v is AppSettings =>
   rate(v.dailyCapUsd) &&
   rate(v.monthlyCapUsd) &&
   bool(v.notifications) &&
-  bool(v.checkUpdates)
+  bool(v.checkUpdates) &&
+  isVoice(v.voice)
+
+export const isVoice = (v: unknown): v is Voice =>
+  obj(v) &&
+  str(v.sttProvider, 200) &&
+  str(v.sttModel, 200) &&
+  oneOf(v.tts, ['system', 'provider'] as const) &&
+  str(v.ttsProvider, 200) &&
+  str(v.ttsModel, 200) &&
+  str(v.ttsVoice, 200)
+
+/** Recorded speech: some bytes, at most the 25 MB the transcription APIs take. */
+export const isAudio = (v: unknown): v is Uint8Array => v instanceof Uint8Array && v.byteLength > 0 && v.byteLength <= 25 * 1024 * 1024
 
 export const isLimits = (v: unknown): v is Limits => obj(v) && rate(v.maxRequests) && rate(v.maxChatter) && rate(v.compactAt)
 

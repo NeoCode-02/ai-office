@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_LIMITS, DEFAULT_SANDBOX, DEFAULT_SETTINGS, type Agent, type Project } from '../shared/types'
-import { bool, isAgent, isId, isMcp, isModelRef, isProject, isProvider, isSandbox, isSettings, num, obj, optStr, str, strArr } from './validate'
+import { bool, isAgent, isAudio, isId, isMcp, isModelRef, isProject, isProvider, isSandbox, isSettings, num, obj, optStr, str, strArr } from './validate'
 
 const agent = (x: Partial<Agent> = {}): Agent => ({
   id: 'a1b2c3d4', name: 'Ann', title: 'CEO', department: 'Leadership', reportsTo: null, instructions: 'Lead.',
@@ -64,6 +64,21 @@ describe('primitives', () => {
     expect(strArr(['a'], 0)).toBe(false)
     expect(strArr(['abc'], 5, 2)).toBe(false)
     expect(strArr('a')).toBe(false)
+  })
+})
+
+describe('settings and audio', () => {
+  it('checks every voice setting and the size of a recording', () => {
+    expect(isSettings(DEFAULT_SETTINGS)).toBe(true)
+    expect(isSettings({ ...DEFAULT_SETTINGS, voice: { ...DEFAULT_SETTINGS.voice, tts: 'provider', ttsVoice: 'nova' } })).toBe(true)
+    for (const voice of [undefined, null, { ...DEFAULT_SETTINGS.voice, tts: 'loud' }, { ...DEFAULT_SETTINGS.voice, sttModel: 'x'.repeat(201) }, { ...DEFAULT_SETTINGS.voice, sttProvider: 1 }]) {
+      expect(isSettings({ ...DEFAULT_SETTINGS, voice }), JSON.stringify(voice)).toBe(false)
+    }
+    expect(isAudio(new Uint8Array([1, 2]))).toBe(true)
+    expect(isAudio(new Uint8Array(0))).toBe(false)
+    expect(isAudio(new Uint8Array(25 * 1024 * 1024 + 1))).toBe(false)
+    expect(isAudio([1, 2])).toBe(false)
+    expect(isAudio('audio')).toBe(false)
   })
 })
 

@@ -402,6 +402,7 @@ const en = {
   },
   errors: {
     E_ATTACH_NOT_FILE: (n: string) => `${n} is not a file, so it can’t be attached.`,
+    E_NO_STT: 'Choose a speech-to-text provider in Settings → General → Voice first.',
     E_ATTACH_TOO_BIG: (n: string) => `${n} is larger than 50 MB.`,
     E_NO_PROJECT: 'This office no longer exists.',
     E_NO_WORKSPACE: 'Workspace folder not found. Choose an existing folder in Settings.',
@@ -843,6 +844,7 @@ const uz: Dict = {
   },
   errors: {
     E_ATTACH_NOT_FILE: (n: string) => `${n} fayl emas, uni biriktirib bo‘lmaydi.`,
+    E_NO_STT: 'Avval Sozlamalar → Umumiy → Ovoz bo‘limida ovozdan matnga provayderini tanlang.',
     E_ATTACH_TOO_BIG: (n: string) => `${n} 50 MB dan katta.`,
     E_NO_PROJECT: 'Bu ofis endi mavjud emas.',
     E_NO_WORKSPACE: 'Ish papkasi topilmadi. Sozlamalarda mavjud papkani tanlang.',

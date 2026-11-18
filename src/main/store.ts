@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { DEFAULT_SETTINGS, type AppSettings, type OfficeEvent, type Project, type Provider, type RunSummary, type UsageRecord } from '../shared/types'
 import type { Conn } from './providers'
+import { voiceFrom } from '../shared/voice'
 import { bool, num, obj } from './validate'
 
 interface StoredProvider extends Omit<Provider, 'hasKey'> {
@@ -37,6 +38,7 @@ function settingsFrom(v: unknown, base: AppSettings): AppSettings {
   if (num(v.monthlyCapUsd, 0)) s.monthlyCapUsd = v.monthlyCapUsd
   if (bool(v.notifications)) s.notifications = v.notifications
   if (bool(v.checkUpdates)) s.checkUpdates = v.checkUpdates
+  s.voice = voiceFrom(v.voice, base.voice)
   return s
 }
 

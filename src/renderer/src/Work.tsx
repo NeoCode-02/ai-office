@@ -136,6 +136,27 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
     }
   }
 
+  /** Speech becomes text in the message box, to check before sending. */
+  const listen = async (audio: Uint8Array) => {
+    try {
+      const said = await window.office.transcribe(audio)
+      if (!said) return notify(t.media.heardNothing)
+      setText((cur) => (cur.trim() ? `${cur.trimEnd()} ${said}` : said))
+    } catch (e) {
+      notify(errText(e, t))
+    }
+  }
+
+  const canRecord = async () => {
+    try {
+      if ((await window.office.getSettings()).voice.sttProvider) return true
+      notify(errText(new Error('E_NO_STT'), t))
+    } catch (e) {
+      notify(errText(e, t))
+    }
+    return false
+  }
+
   const send = async () => {
     // The paths are for the team, so this line stays in English like the rest of their instructions.
     const msg = [text.trim(), files.length ? `Attached files: ${files.join(', ')}` : ''].filter(Boolean).join('\n\n')
@@ -227,6 +248,9 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
       files={files}
       onAttach={(paths) => void attach(paths)}
       onRemoveFile={(p) => setFiles((cur) => cur.filter((x) => x !== p))}
+      onAudio={listen}
+      canRecord={canRecord}
+      onError={notify}
     />
   )
 

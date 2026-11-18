@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useT } from '../i18n'
 import { Icon } from '../ui'
+import { Mic } from './Mic'
 
 const name = (p: string) => p.split('/').pop() ?? p
 
-export function Composer({ value, onChange, onSend, busy, placeholder, hint, autoFocus, files, onAttach, onRemoveFile }: {
+export function Composer({ value, onChange, onSend, busy, placeholder, hint, autoFocus, files, onAttach, onRemoveFile, onAudio, canRecord, onError }: {
   value: string
   onChange(v: string): void
   onSend(): void
@@ -17,10 +18,16 @@ export function Composer({ value, onChange, onSend, busy, placeholder, hint, aut
   /** Paths of files dropped on the box, or none to pick them in a dialog. */
   onAttach(paths?: string[]): void
   onRemoveFile(path: string): void
+  /** Recorded speech from the microphone button. */
+  onAudio(audio: Uint8Array): Promise<void>
+  canRecord(): Promise<boolean>
+  onError(message: string): void
 }) {
   const t = useT()
   const ref = useRef<HTMLTextAreaElement>(null)
   const [dropping, setDropping] = useState(false)
+  const [voice, setVoice] = useState<{ recording: number | null; working: boolean }>({ recording: null, working: false })
+  const onVoice = useCallback((recording: number | null, working: boolean) => setVoice({ recording, working }), [])
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -79,12 +86,21 @@ export function Composer({ value, onChange, onSend, busy, placeholder, hint, aut
             }
           }}
         />
+        <Mic onAudio={onAudio} canRecord={canRecord} onError={onError} onState={onVoice} disabled={busy} />
         <button type="button" className="send" onClick={onSend} disabled={(!value.trim() && !files.length) || busy} aria-label={t.work.send}>
           <Icon name="arrowUp" size={17} />
         </button>
       </div>
       <div className="composer-hint">
-        <span>{t.work.hint}</span>
+        {voice.recording !== null ? (
+          <span className="recording" role="status">
+            <span className="rec-dot" aria-hidden /> {t.media.recording(voice.recording)}
+          </span>
+        ) : voice.working ? (
+          <span role="status">{t.media.transcribing}</span>
+        ) : (
+          <span>{t.work.hint}</span>
+        )}
         <span className="spacer" />
         <span>{hint}</span>
       </div>

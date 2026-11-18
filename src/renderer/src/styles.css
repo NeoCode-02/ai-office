@@ -383,6 +383,11 @@ details.more[open] > summary svg { transform: rotate(90deg); }
 .composer-box.dropping { border-color: var(--accent); border-style: dashed; background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
 .composer-tool { width: 34px; height: 34px; margin-left: -8px; border: 0; border-radius: 10px; background: none; color: var(--text-3); display: grid; place-items: center; flex-shrink: 0; transition: background 0.15s, color 0.15s; }
 .composer-tool:hover { background: var(--raised); color: var(--text); }
+.composer-tool.mic { margin-left: 0; touch-action: none; }
+.composer-tool.mic.recording { background: var(--danger); color: #fff; box-shadow: 0 0 0 4px var(--danger-soft); }
+.composer-tool.mic.working svg { animation: org-spin 0.9s linear infinite; }
+.composer-hint .recording { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-variant-numeric: tabular-nums; }
+.rec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); animation: blink 1.2s var(--ease) infinite; }
 .attachments { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .attachment { display: flex; align-items: center; gap: 6px; max-width: 260px; height: 28px; padding: 0 4px 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12.5px; color: var(--text-2); animation: rise 0.16s var(--ease); }
 .attachment button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--text-3); display: grid; place-items: center; flex-shrink: 0; }

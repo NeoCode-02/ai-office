@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { CHANNELS, type Api } from '../shared/api'
+import { sttModelFor } from '../shared/voice'
 import { SYSTEM, type AppSettings, type McpServer, type ModelRef, type OfficeEvent, type Price, type Project, type Provider } from '../shared/types'
 import { attach } from './attachments'
 import { balance } from './balance'
@@ -13,11 +14,11 @@ import { projectFromJson, projectToJson, runToMarkdown } from './exporting'
 import { createExtensions } from './extensions'
 import { McpClient, McpPool } from './mcp'
 import { Office } from './office'
-import { listModels, PRESETS } from './providers'
+import { listModels, PRESETS, transcribe } from './providers'
 import { quotaUse, stats, windowStart } from './stats'
 import { createStore } from './store'
 import { checkUpdate } from './updates'
-import { bool, isId, isMcp, isModelRef, isPrices, isProject, isProvider, isSettings, num, obj, optStr, str, strArr } from './validate'
+import { bool, isAudio, isId, isMcp, isModelRef, isPrices, isProject, isProvider, isSettings, num, obj, optStr, str, strArr } from './validate'
 import { createAttention, createCaps, fileName, providerUsers, throttle, unpricedMembers, withRule } from './wiring'
 
 // Separate data folder for tests / portable use.
@@ -77,6 +78,12 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, '../preload/index.js'), sandbox: true, contextIsolation: true }
   })
   win.once('ready-to-show', () => win?.show())
+  const ours = (wc: Electron.WebContents | null) => wc !== null && wc === win?.webContents
+  win.webContents.session.setPermissionRequestHandler((wc, permission, done, details) => {
+    const media = 'mediaTypes' in details ? (details.mediaTypes ?? []) : []
+    done(ours(wc) && ((permission === 'media' && media.length > 0 && media.every((m) => m === 'audio')) || permission === 'clipboard-sanitized-write'))
+  })
+  win.webContents.session.setPermissionCheckHandler((wc, permission) => ours(wc) && (permission === 'media' || permission === 'clipboard-sanitized-write'))
   // Links never open inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url)
@@ -236,6 +243,12 @@ const handlers: Api = {
     if (which) stopAll('cap', capSpent(which))
   },
   checkUpdate: () => checkUpdate(app.getVersion()),
+  transcribe: (audio: Uint8Array) => {
+    const id = settings.voice.sttProvider
+    if (!id || store.provider(id)?.kind !== 'openai') throw new Error('E_NO_STT')
+    const conn = store.conn(id)
+    return transcribe(conn, settings.voice.sttModel.trim() || sttModelFor(conn.baseURL), audio)
+  },
   listProviders: () => store.listProviders(),
   saveProvider: (p: Omit<Provider, 'hasKey'>, key: string) => store.saveProvider(p, key),
   deleteProvider: (id: string, force?: boolean) => {
@@ -443,6 +456,7 @@ const ARGS: Record<keyof Api, (a: unknown[]) => boolean> = {
   getSettings: none,
   saveSettings: (a) => isSettings(a[0]),
   checkUpdate: none,
+  transcribe: (a) => isAudio(a[0]),
   listProviders: none,
   saveProvider: (a) => isProvider(a[0]) && str(a[1], 10_000),
   deleteProvider: (a) => label(a[0]) && optBool(a[1]),

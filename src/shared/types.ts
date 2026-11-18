@@ -152,8 +152,24 @@ export interface AppSettings {
   notifications: boolean
   /** Look for a newer release on GitHub at startup (at most once a day). */
   checkUpdates: boolean
+  voice: Voice
 }
-export const DEFAULT_SETTINGS: AppSettings = { theme: 'system', dailyCapUsd: 0, monthlyCapUsd: 0, notifications: true, checkUpdates: true }
+
+/**
+ * Speaking to the team and hearing it. Speech to text runs on an OpenAI-compatible provider
+ * (sttModel '' = shared/voice.ts sttModelFor). Replies are read by the system's voices or by a
+ * provider's text-to-speech (ttsModel/ttsVoice '' = shared/voice.ts defaults).
+ */
+export interface Voice {
+  sttProvider: string
+  sttModel: string
+  tts: 'system' | 'provider'
+  ttsProvider: string
+  ttsModel: string
+  ttsVoice: string
+}
+export const DEFAULT_VOICE: Voice = { sttProvider: '', sttModel: '', tts: 'system', ttsProvider: '', ttsModel: '', ttsVoice: '' }
+export const DEFAULT_SETTINGS: AppSettings = { theme: 'system', dailyCapUsd: 0, monthlyCapUsd: 0, notifications: true, checkUpdates: true, voice: DEFAULT_VOICE }
 
 export interface CapUse {
   day: number

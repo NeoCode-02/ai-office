@@ -44,6 +44,7 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     res.setHeader('content-type', 'application/json')
     if (req.url.endsWith('/models')) return res.end(JSON.stringify({ object: 'list', data: [{ id: 'fake-model', object: 'model' }] }))
+    if (req.url.endsWith('/audio/transcriptions')) return res.end(JSON.stringify({ text: body.includes('webm') ? 'hello from voice' : 'not a recording' }))
     const { messages } = JSON.parse(body)
     const owner = messages.filter((m) => m.role === 'user').at(-1)?.content ?? ''
     if (typeof owner === 'string' && owner.includes('[From the owner] again')) {
@@ -62,7 +63,8 @@ const providerUrl = `http://127.0.0.1:${server.address().port}/v1`
 const require_ = (await import('node:module')).createRequire(import.meta.url)
 const electron = require_('electron')
 // CI Linux has neither a user-namespace sandbox nor a keyring for safeStorage.
-const args = [root, '--remote-debugging-port=0', ...(process.platform === 'linux' && process.env.CI ? ['--no-sandbox', '--password-store=basic'] : [])]
+// A fake microphone (a tone) stands in for a real one.
+const args = [root, '--remote-debugging-port=0', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', ...(process.platform === 'linux' && process.env.CI ? ['--no-sandbox', '--password-store=basic'] : [])]
 const app = spawn(electron, args, { env: { ...process.env, AI_OFFICE_DATA: data, ELECTRON_ENABLE_LOGGING: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
 let appLog = ''
 app.stdout.on('data', (d) => (appLog += d))
@@ -237,6 +239,25 @@ try {
     await until('Allow', clickText, 'Allow')
     await until('the final report', hasText, 'Final report')
     if (fs.readFileSync(path.join(ws, 'hello.txt'), 'utf8') !== 'Hello from the team\n') throw new Error('hello.txt has the wrong content')
+  })
+
+  await step('speak a message', async () => {
+    // Choose the fake provider for speech to text, then hold the microphone button for a second.
+    await inPage(async () => {
+      const s = await window.office.getSettings()
+      const [p] = await window.office.listProviders()
+      await window.office.saveSettings({ ...s, voice: { ...s.voice, sttProvider: p.id } })
+    })
+    const mic = await until('the microphone button', () => {
+      const r = document.querySelector('.composer .mic')?.getBoundingClientRect()
+      return r && { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...mic })
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...mic })
+    await until('recording', () => document.querySelector('.composer .mic.recording') !== null)
+    await new Promise((r) => setTimeout(r, 1200))
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...mic })
+    await until('the words in the message box', () => document.querySelector('.composer textarea')?.value === 'hello from voice')
   })
 
   await step('see the change and undo it', async () => {

@@ -59,7 +59,9 @@ describe('withDefaults', () => {
       dailyCapUsd: 2.5,
       monthlyCapUsd: 40,
       notifications: false,
-      checkUpdates: false
+      checkUpdates: false,
+      // Saved before voice settings existed.
+      voice: DEFAULT_SETTINGS.voice
     })
   })
 })
