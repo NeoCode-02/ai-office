@@ -72,6 +72,13 @@ export async function transcribe(conn: Conn, model: string, audio: Uint8Array): 
   return r.text.trim()
 }
 
+/** Spoken text (mp3) through an OpenAI-compatible /audio/speech. */
+export async function speak(conn: Conn, model: string, voice: string, text: string): Promise<Uint8Array> {
+  const client = new OpenAI({ apiKey: conn.apiKey, baseURL: conn.baseURL || undefined })
+  const res = await client.audio.speech.create({ model, voice, input: text, response_format: 'mp3' })
+  return new Uint8Array(await res.arrayBuffer())
+}
+
 /** Lists model ids for the "Model" picker; empty when the endpoint has no /models. */
 export async function listModels(conn: Conn): Promise<string[]> {
   if (conn.kind === 'anthropic') {

@@ -34,6 +34,8 @@ export interface Api {
   checkUpdate(): Promise<UpdateInfo>
   /** Text of recorded speech, on the speech-to-text provider of the settings. Throws E_NO_STT. */
   transcribe(audio: Uint8Array): Promise<string>
+  /** mp3 of the text in the provider voice of the settings (first 4000 characters). Throws E_NO_TTS. */
+  speak(text: string): Promise<Uint8Array>
 
   listProviders(): Provider[]
   saveProvider(p: Omit<Provider, 'hasKey'>, key: string): void

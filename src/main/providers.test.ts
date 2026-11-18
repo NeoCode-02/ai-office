@@ -2,7 +2,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { classify } from './errors'
-import { openChat, transcribe, type ToolDef } from './providers'
+import { openChat, speak, transcribe, type ToolDef } from './providers'
 import { sttModelFor } from '../shared/voice'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- request bodies are checked as plain JSON */
@@ -238,6 +238,17 @@ describe('speech to text', () => {
     expect(body).toMatch(/name="model"\r\n\r\nwhisper-large-v3-turbo/)
     expect(body).toMatch(/filename="speech\.webm"/)
     expect(body).toContain('\x1a\x45\xdf\xa3')
+  })
+
+  it('gets spoken text as mp3 from /audio/speech', async () => {
+    const api = await fakeApi([(res) => {
+      res.writeHead(200, { 'content-type': 'audio/mpeg' })
+      res.end(Buffer.from([0xff, 0xf3, 1, 2]))
+    }])
+    const mp3 = await speak(openai(`${api.url}/v1`), 'gpt-4o-mini-tts', 'nova', 'Salom')
+    expect([...mp3]).toEqual([0xff, 0xf3, 1, 2])
+    expect(api.seen[0].url).toBe('/v1/audio/speech')
+    expect(api.seen[0].body).toEqual({ model: 'gpt-4o-mini-tts', voice: 'nova', input: 'Salom', response_format: 'mp3' })
   })
 
   it('picks a model the provider offers when none is set', () => {

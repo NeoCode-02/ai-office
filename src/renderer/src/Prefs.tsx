@@ -5,7 +5,8 @@ import { errText, LANGS, setLang, useT, getLang, type Lang } from './i18n'
 import Providers from './Providers'
 import { httpsUrl, parseUsd, updateState, withDefaults } from './shellUtils'
 import { Field, Icon, Mark, Switch, type IconName } from './ui'
-import { sttModelFor } from '../../shared/voice'
+import { sttModelFor, TTS_MODEL, TTS_VOICES } from '../../shared/voice'
+import { createSpeaker } from './work/speech'
 
 export type PrefsTab = 'providers' | 'extensions' | 'general'
 
@@ -155,7 +156,7 @@ function General({ notify }: { notify(t: string): void }) {
             <Caps settings={settings} onSave={(dailyCapUsd, monthlyCapUsd) => save({ dailyCapUsd, monthlyCapUsd })} />
           </section>
 
-          <VoiceSettings settings={settings} onSave={(voice) => save({ voice })} />
+          <VoiceSettings settings={settings} onSave={(voice) => save({ voice })} notify={notify} />
 
           <section className="section">
             <div className="list">
@@ -282,17 +283,33 @@ function UpdateCheck() {
 }
 
 /** Speech to text (and, with Talk, the voice that reads replies). Providers with a key and an OpenAI-compatible API. */
-function VoiceSettings({ settings, onSave }: { settings: AppSettings; onSave(v: Voice): void }) {
+function VoiceSettings({ settings, onSave, notify }: { settings: AppSettings; onSave(v: Voice): void; notify(t: string): void }) {
   const t = useT()
   const m = t.media
   const [providers, setProviders] = useState<Provider[]>([])
   const sttId = useId()
   const modelId = useId()
+  const ttsId = useId()
+  const voiceId = useId()
+  const ttsModelId = useId()
+  const [testing, setTesting] = useState(false)
   useEffect(() => {
     void window.office.listProviders().then((list) => setProviders(list.filter((x) => x.kind === 'openai' && x.hasKey)), () => undefined)
   }, [])
   const v = settings.voice
   const stt = providers.find((x) => x.id === v.sttProvider)
+  const tts = providers.find((x) => x.id === v.ttsProvider)
+  const listen = () => {
+    setTesting(true)
+    const speaker = createSpeaker(async () => (await window.office.getSettings()).voice, getLang)
+    speaker.onError((e) => notify(errText(e, t)))
+    const off = speaker.subscribe(() => {
+      if (speaker.speaking()) return
+      off()
+      setTesting(false)
+    })
+    speaker.say(m.sample)
+  }
   return (
     <section className="section">
       <div className="section-head">
@@ -328,6 +345,55 @@ function VoiceSettings({ settings, onSave }: { settings: AppSettings; onSave(v: 
               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
             />
           </div>
+        )}
+        <div className="list-row">
+          <div className="spacer">
+            <div style={{ fontWeight: 600 }}>{m.tts}</div>
+            <div className="muted small">{v.tts === 'provider' ? m.ttsProviderHint : m.ttsSystemHint}</div>
+          </div>
+          <div className="seg" role="group" aria-label={m.tts}>
+            {(['system', 'provider'] as const).map((k) => (
+              <button key={k} type="button" className={v.tts === k ? 'on' : ''} aria-pressed={v.tts === k} onClick={() => v.tts !== k && onSave({ ...v, tts: k })}>
+                {k === 'system' ? m.ttsSystem : m.ttsProvider}
+              </button>
+            ))}
+          </div>
+          <button className="btn sm" onClick={listen} disabled={testing || (v.tts === 'provider' && !tts)}>
+            <Icon name="speaker" size={13} /> {m.listen}
+          </button>
+        </div>
+        {v.tts === 'provider' && (
+          <>
+            <div className="list-row">
+              <div className="spacer">
+                <label htmlFor={ttsId} style={{ fontWeight: 600 }}>{m.ttsProvider}</label>
+                <div className="muted small">{providers.length ? m.ttsHint : m.sttNone}</div>
+              </div>
+              <select id={ttsId} className="select org-image" value={tts ? v.ttsProvider : ''} onChange={(e) => onSave({ ...v, ttsProvider: e.target.value })}>
+                <option value="">{m.sttOff}</option>
+                {providers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </div>
+            {tts && (
+              <div className="list-row">
+                <label htmlFor={voiceId} className="spacer" style={{ fontWeight: 600 }}>{m.ttsVoice}</label>
+                <select id={voiceId} className="select org-num" value={v.ttsVoice || TTS_VOICES[0]} onChange={(e) => onSave({ ...v, ttsVoice: e.target.value })}>
+                  {TTS_VOICES.map((x) => <option key={x} value={x}>{x}</option>)}
+                </select>
+                <label htmlFor={ttsModelId} className="org-sr">{m.ttsModel}</label>
+                <input
+                  key={tts.id}
+                  id={ttsModelId}
+                  className="input mono org-image"
+                  defaultValue={v.ttsModel}
+                  placeholder={TTS_MODEL}
+                  title={m.ttsModel}
+                  onBlur={(e) => e.target.value.trim() !== v.ttsModel && onSave({ ...v, ttsModel: e.target.value.trim() })}
+                  onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>

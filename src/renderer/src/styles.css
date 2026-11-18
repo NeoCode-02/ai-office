@@ -384,6 +384,8 @@ details.more[open] > summary svg { transform: rotate(90deg); }
 .composer-tool { width: 34px; height: 34px; margin-left: -8px; border: 0; border-radius: 10px; background: none; color: var(--text-3); display: grid; place-items: center; flex-shrink: 0; transition: background 0.15s, color 0.15s; }
 .composer-tool:hover { background: var(--raised); color: var(--text); }
 .composer-tool.mic { margin-left: 0; touch-action: none; }
+.btn.talk.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent-text); }
+.btn.talk.speaking svg { color: var(--accent-text); }
 .composer-tool.mic.recording { background: var(--danger); color: #fff; box-shadow: 0 0 0 4px var(--danger-soft); }
 .composer-tool.mic.working svg { animation: org-spin 0.9s linear infinite; }
 .composer-hint .recording { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-variant-numeric: tabular-nums; }

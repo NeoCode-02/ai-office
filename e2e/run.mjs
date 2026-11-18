@@ -27,6 +27,7 @@ function reply(messages) {
   const text = last.role === 'user' ? String(last.content) : ''
   const lastCall = messages.filter((m) => m.role === 'assistant').at(-1)?.tool_calls?.[0]?.function?.name
   if (me === 'Maya') {
+    if (text.includes('hello from voice')) return { role: 'assistant', content: 'Heard you.' }
     if (text.includes('[From the owner]')) return call('message', { to: ['Daniel'], text: 'Write hello.txt and check Node.' })
     if (text.includes('[From Daniel')) return call('report_to_user', { summary: '## Done\nDaniel wrote `hello.txt` and checked Node.' })
   }
@@ -258,6 +259,25 @@ try {
     await new Promise((r) => setTimeout(r, 1200))
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...mic })
     await until('the words in the message box', () => document.querySelector('.composer textarea')?.value === 'hello from voice')
+    // With Talk on, speaking is sending: the words go to the CEO without waiting in the box.
+    await inPage(() => (document.querySelector('.composer textarea').value = ''))
+    await until('Talk', () => {
+      const b = document.querySelector('.workbar .talk')
+      if (b && b.getAttribute('aria-pressed') !== 'true') b.click()
+      return b?.getAttribute('aria-pressed') === 'true'
+    })
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...mic })
+    await until('recording', () => document.querySelector('.composer .mic.recording') !== null)
+    await new Promise((r) => setTimeout(r, 1200))
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...mic })
+    await until('the spoken message in the feed', hasText, 'hello from voice')
+    await until('the reply', hasText, 'Heard you.')
+    await until('Talk off', () => {
+      const b = document.querySelector('.workbar .talk')
+      if (b?.classList.contains('speaking')) b.click()
+      if (b && b.getAttribute('aria-pressed') === 'true' && !b.classList.contains('speaking')) b.click()
+      return b?.getAttribute('aria-pressed') === 'false'
+    })
   })
 
   await step('see the change and undo it', async () => {

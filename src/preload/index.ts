@@ -6,7 +6,7 @@ type Async<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...
 
 // Record (not an array) so TypeScript fails when a handler is missing here.
 const names: Record<keyof Api, true> = {
-  appInfo: true, presets: true, getSettings: true, saveSettings: true, checkUpdate: true, transcribe: true,
+  appInfo: true, presets: true, getSettings: true, saveSettings: true, checkUpdate: true, transcribe: true, speak: true,
   listProviders: true, saveProvider: true, deleteProvider: true, listModels: true, priceInfo: true, catalogPrices: true, usageStats: true, balance: true,
   listProjects: true, saveProject: true, deleteProject: true, exportProject: true, importProject: true, pickFolder: true, openWorkspace: true, attach: true,
   listSkills: true, setSkillEnabled: true, createSkill: true, importSkill: true, deleteSkill: true,

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { CHANNELS, type Api } from '../shared/api'
-import { sttModelFor } from '../shared/voice'
+import { sttModelFor, TTS_MODEL, TTS_VOICES } from '../shared/voice'
 import { SYSTEM, type AppSettings, type McpServer, type ModelRef, type OfficeEvent, type Price, type Project, type Provider } from '../shared/types'
 import { attach } from './attachments'
 import { balance } from './balance'
@@ -14,7 +14,7 @@ import { projectFromJson, projectToJson, runToMarkdown } from './exporting'
 import { createExtensions } from './extensions'
 import { McpClient, McpPool } from './mcp'
 import { Office } from './office'
-import { listModels, PRESETS, transcribe } from './providers'
+import { listModels, PRESETS, speak, transcribe } from './providers'
 import { quotaUse, stats, windowStart } from './stats'
 import { createStore } from './store'
 import { checkUpdate } from './updates'
@@ -249,6 +249,11 @@ const handlers: Api = {
     const conn = store.conn(id)
     return transcribe(conn, settings.voice.sttModel.trim() || sttModelFor(conn.baseURL), audio)
   },
+  speak: (text: string) => {
+    const v = settings.voice
+    if (!v.ttsProvider || store.provider(v.ttsProvider)?.kind !== 'openai') throw new Error('E_NO_TTS')
+    return speak(store.conn(v.ttsProvider), v.ttsModel.trim() || TTS_MODEL, v.ttsVoice || TTS_VOICES[0], text.slice(0, 4000))
+  },
   listProviders: () => store.listProviders(),
   saveProvider: (p: Omit<Provider, 'hasKey'>, key: string) => store.saveProvider(p, key),
   deleteProvider: (id: string, force?: boolean) => {
@@ -457,6 +462,7 @@ const ARGS: Record<keyof Api, (a: unknown[]) => boolean> = {
   saveSettings: (a) => isSettings(a[0]),
   checkUpdate: none,
   transcribe: (a) => isAudio(a[0]),
+  speak: (a) => str(a[0], 100_000) && a[0].trim().length > 0,
   listProviders: none,
   saveProvider: (a) => isProvider(a[0]) && str(a[1], 10_000),
   deleteProvider: (a) => label(a[0]) && optBool(a[1]),

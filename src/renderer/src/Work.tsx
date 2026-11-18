@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { SYSTEM, USER, type Agent, type AgentStatus, type OfficeEvent, type Project, type Provider, type RunSummary } from '../../shared/types'
 import type { Live } from './App'
-import { errText, useT } from './i18n'
+import { errText, getLang, useT } from './i18n'
 import { Avatar, dateTime, Empty, Icon, Sheet, usd } from './ui'
 import { BudgetPill, RaiseBudget } from './work/Budget'
 import { ChangesSheet, useRunChanges } from './work/Changes'
@@ -9,6 +9,7 @@ import { Composer } from './work/Composer'
 import { FeedItem, type FeedCtx } from './work/FeedItem'
 import { HistoryModal } from './work/History'
 import { LiveReplies, useDeltas } from './work/Live'
+import { createSpeaker } from './work/speech'
 import { approvalShortcut, buildItems, errCode, forMember, isEditable, summarize, type Item } from './work/logic'
 
 interface Props {
@@ -21,6 +22,23 @@ interface Props {
 }
 
 type Panel = { kind: 'person'; id: string } | { kind: 'changes' } | null
+const TALK_KEY = 'ai-office.talk'
+
+/** localStorage can be unavailable; Talk being remembered is only a convenience. */
+function stored(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+function store(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // not remembered; still applies until the app closes
+  }
+}
 const NO_DELTAS: Record<string, string> = {}
 
 export default function Work({ project, providers, live, notify, goTeam, onSave }: Props) {
@@ -29,6 +47,11 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
   const [text, setText] = useState('')
   /** Workspace paths of the files attached to the message being written. */
   const [files, setFiles] = useState<string[]>([])
+  const [talk, setTalk] = useState(() => stored(TALK_KEY) === '1')
+  const [speaker] = useState(() => createSpeaker(() => window.office.getSettings().then((s) => s.voice), getLang))
+  useEffect(() => speaker.onError((e) => notify(errText(e))), [speaker, notify])
+  const speaking = useSyncExternalStore(speaker.subscribe, speaker.speaking)
+  useEffect(() => () => speaker.stop(), [speaker])
   const [focus, setFocus] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel>(null)
   const [fresh, setFresh] = useState(false)
@@ -119,6 +142,20 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
     return () => window.removeEventListener('keydown', onKey)
   }, [only, historyOpen, onAnswer])
 
+  const spoken = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const toOwner = (live?.events ?? []).filter((e): e is Extract<OfficeEvent, { type: 'message' }> => e.type === 'message' && e.from !== USER && e.from !== SYSTEM && e.to.includes(USER))
+    if (!talk || spoken.current === null) {
+      spoken.current = new Set(toOwner.map((e) => e.id))
+      return
+    }
+    for (const e of toOwner) {
+      if (spoken.current.has(e.id)) continue
+      spoken.current.add(e.id)
+      speaker.say(e.text)
+    }
+  }, [live?.events, talk, speaker])
+
   useEffect(() => {
     const el = feedRef.current
     if (el && stick.current) el.scrollTop = el.scrollHeight
@@ -141,13 +178,17 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
     try {
       const said = await window.office.transcribe(audio)
       if (!said) return notify(t.media.heardNothing)
-      setText((cur) => (cur.trim() ? `${cur.trimEnd()} ${said}` : said))
+      // In Talk, speaking is sending; otherwise the words wait in the box to be checked.
+      if (talk) await send(said)
+      else setText((cur) => (cur.trim() ? `${cur.trimEnd()} ${said}` : said))
     } catch (e) {
       notify(errText(e, t))
     }
   }
 
   const canRecord = async () => {
+    // Nobody talks over the reply being read.
+    speaker.stop()
     try {
       if ((await window.office.getSettings()).voice.sttProvider) return true
       notify(errText(new Error('E_NO_STT'), t))
@@ -157,9 +198,10 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
     return false
   }
 
-  const send = async () => {
+  /** spoken: words from the microphone in Talk, sent instead of the box's text (which stays as it is). */
+  const send = async (spoken?: string) => {
     // The paths are for the team, so this line stays in English like the rest of their instructions.
-    const msg = [text.trim(), files.length ? `Attached files: ${files.join(', ')}` : ''].filter(Boolean).join('\n\n')
+    const msg = [(spoken ?? text).trim(), files.length ? `Attached files: ${files.join(', ')}` : ''].filter(Boolean).join('\n\n')
     if (!msg || busy) return
     const to = canContinue && target && target.id !== ceo?.id ? target.id : undefined
     setBusy(true)
@@ -172,7 +214,7 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
         setFocus(null)
       }
       setRefused(null)
-      setText('')
+      if (spoken === undefined) setText('')
       setFiles([])
       stick.current = true
     } catch (e) {
@@ -240,7 +282,7 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
     <Composer
       value={text}
       onChange={setText}
-      onSend={send}
+      onSend={() => void send()}
       busy={busy}
       autoFocus={fresh}
       placeholder={canContinue ? t.work.placeholderTo(target?.name ?? '') : t.work.placeholderGoal}
@@ -345,6 +387,18 @@ export default function Work({ project, providers, live, notify, goTeam, onSave 
             <Icon name="plus" size={13} /> {t.work.newTask}
           </button>
         )}
+        <button
+          className={`btn sm talk ${talk ? 'on' : ''} ${speaking ? 'speaking' : ''}`}
+          aria-pressed={talk}
+          title={speaking ? t.media.stopSpeaking : t.media.talkHint(ceo?.name ?? '')}
+          onClick={() => {
+            if (speaking) return speaker.stop()
+            setTalk(!talk)
+            store(TALK_KEY, talk ? '0' : '1')
+          }}
+        >
+          <Icon name={speaking ? 'stop' : 'speaker'} size={13} /> {speaking ? t.media.stopSpeaking : t.media.talk}
+        </button>
         <button className="btn quiet icon sm" title={t.work.history} aria-label={t.work.history} onClick={() => setHistoryOpen(true)}>
           <Icon name="history" />
         </button>

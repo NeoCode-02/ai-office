@@ -20,7 +20,20 @@ const en = {
   sttOff: 'Off',
   sttNone: 'Add an OpenAI or Groq provider with a key first.',
   sttModel: 'Speech model',
-  sttModelHint: 'Leave empty for the provider’s usual model.'
+  sttModelHint: 'Leave empty for the provider’s usual model.',
+  talk: 'Talk',
+  talkHint: (ceo: string) => `Talk: ${ceo}’s replies to you are read aloud, and what you say is sent as soon as you let go of the microphone.`,
+  stopSpeaking: 'Stop reading',
+  tts: 'Read replies with',
+  ttsHint: 'Used by Talk on the work view.',
+  ttsSystem: 'Windows voices',
+  ttsProvider: 'Provider voice',
+  ttsSystemHint: 'Free and offline. A voice in the app’s language is used when Windows has one.',
+  ttsProviderHint: 'Natural voices in many languages, Uzbek too. Costs a little per reply; the text is sent to this provider.',
+  ttsVoice: 'Voice',
+  ttsModel: 'Voice model',
+  listen: 'Listen',
+  sample: 'Hello! This is how replies will sound.'
 }
 
 const uz: typeof en = {
@@ -41,7 +54,20 @@ const uz: typeof en = {
   sttOff: 'O‘chiq',
   sttNone: 'Avval kaliti bor OpenAI yoki Groq provayderini qo‘shing.',
   sttModel: 'Ovoz modeli',
-  sttModelHint: 'Bo‘sh qolsa provayderning odatiy modeli ishlatiladi.'
+  sttModelHint: 'Bo‘sh qolsa provayderning odatiy modeli ishlatiladi.',
+  talk: 'Suhbat',
+  talkHint: (ceo: string) => `Suhbat: ${ceo}ning sizga javoblari ovoz chiqarib o‘qiladi, aytganingiz esa mikrofonni qo‘yib yuborishingiz bilan yuboriladi.`,
+  stopSpeaking: 'O‘qishni to‘xtatish',
+  tts: 'Javoblarni o‘qish',
+  ttsHint: 'Ish sahifasidagi Suhbat rejimida ishlatiladi.',
+  ttsSystem: 'Windows ovozlari',
+  ttsProvider: 'Provayder ovozi',
+  ttsSystemHint: 'Bepul va oflayn. Windows’da ilova tilidagi ovoz bo‘lsa, o‘sha ishlatiladi.',
+  ttsProviderHint: 'Ko‘p tillarda, jumladan o‘zbekcha tabiiy ovoz. Har bir javob uchun ozgina pul ketadi; matn shu provayderga yuboriladi.',
+  ttsVoice: 'Ovoz',
+  ttsModel: 'Ovoz modeli',
+  listen: 'Eshitish',
+  sample: 'Salom! Javoblar shunday o‘qiladi.'
 }
 
 export default { en, uz }
